@@ -42,7 +42,7 @@ class BenchmarkRunner(object):
         process = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         if process.returncode:
             logger.error(f"Failed with return code {process.returncode}, stderr output:")
-            logger.error(process.stdout.decode("utf-8"))
+            logger.error(process.stderr.decode("utf-8"))
             raise RuntimeError(f"Failed running {process_debug_string}")
         return process.stdout.decode("utf-8")
 
