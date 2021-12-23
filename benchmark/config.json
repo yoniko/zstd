@@ -1,0 +1,15 @@
+{
+  "benchmarks": [
+    {
+      "type": "decompress-files",
+      "inputs": [
+        "enwik8.zst",
+        "silesia.tar.zst"
+      ]
+    }
+  ],
+  "compilers": [
+    "gcc",
+    "clang"
+  ]
+}
