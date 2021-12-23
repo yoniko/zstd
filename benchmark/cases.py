@@ -5,6 +5,7 @@ from pydantic import BaseModel
 class BenchmarkCase(BaseModel):
     command_line_args: List[str]
     results_columns: Dict[str, str]
+    repeats: int = 1
 
     def process_output(self, stdout: str) -> Dict[str, Union[str, int, float]]:
         raise NotImplementedError()

@@ -5,6 +5,9 @@ from cases import BenchmarkCase, DecompressBenchmarkCase
 
 
 class BenchmarkTypeBase(BaseModel):
+    type: str
+    repeats: int = 1
+
     def get_cases(self) -> List[BenchmarkCase]:
         raise NotImplementedError()
 
@@ -18,7 +21,8 @@ class BenchmarkDecompressFile(BenchmarkTypeBase):
         return [
             DecompressBenchmarkCase(command_line_args=["-d", file] + self.additional_flags,
                                     results_columns={"type": self.type, "file": file,
-                                                     "additional_flags": ' '.join(self.additional_flags)})
+                                                     "additional_flags": ' '.join(self.additional_flags)},
+                                    repeats=self.repeats)
             for file in self.inputs
         ]
 
@@ -30,7 +34,7 @@ class BenchmarkConfig(BaseModel):
     benchmarks: List[BenchmarkAction]
     realtime: bool = True
     evaluation_time: int = 3
-    # hashes: Optional[List[str]] = None
+    git_labels: Optional[List[str]] = None
     cpu: Optional[int] = None
-    compilers: List[str] = ['']
+    compilers: Optional[List[str]] = None
     cflags: Optional[List[str]] = None

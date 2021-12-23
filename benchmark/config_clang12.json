@@ -6,11 +6,11 @@
         "enwik8.zst",
         "silesia.tar.zst"
       ],
-      "repeats": 5
+      "repeats": 10
     }
   ],
   "compilers": [
-    "clang-9", "clang-10", "clang-11", "clang-12", "gcc-7", "gcc-8", "gcc-9", "gcc-10"
+    "clang-12"
   ],
   "git_labels": [
     "dev",
