@@ -1999,6 +1999,13 @@ int FIO_compressMultipleFilenames(FIO_ctx_t* const fCtx,
 /* **************************************************************************
  *  Decompression
  ***************************************************************************/
+
+#define ERR_READ    (-1)
+#define ERR_MEMORY  (-2)
+
+typedef int (*buffer_fill_at_least_ptr) (void *self, FILE* srcFile, size_t len);
+typedef int (*buffer_consume_ptr) (void *self, size_t);
+
 typedef struct {
     void*  srcBuffer;
     size_t srcBufferSize;
@@ -2007,7 +2014,33 @@ typedef struct {
     size_t dstBufferSize;
     ZSTD_DStream* dctx;
     FILE*  dstFile;
+    buffer_fill_at_least_ptr buffer_fill_at_least;
+    buffer_consume_ptr buffer_consume;
 } dRess_t;
+
+
+static int FIO_dress_buffer_fill_at_least(dRess_t *ress, FILE* srcFile, size_t len) {
+    if (len > ress->srcBufferSize) {
+        // TODO: better error handling
+        return ERR_MEMORY;
+    }
+    while(len > ress->srcBufferLoaded) {
+        size_t bytesRead = fread((char*)ress->srcBuffer + ress->srcBufferLoaded,
+                                 (size_t)1, len - ress->srcBufferLoaded, srcFile);
+        if(bytesRead == 0) {
+            // TODO: better error handling, perhaps return total read here?
+            return ERR_READ;
+        }
+        ress->srcBufferLoaded += bytesRead;
+    }
+    return 0;
+}
+
+static void FIO_dress_buffer_advance(dRess_t *ress, size_t len) {
+    assert(len <= ress->srcBufferLoaded);
+    memmove(ress->srcBuffer, (char*)ress->srcBuffer + len, ress->srcBufferLoaded - len);
+    ress->srcBufferLoaded -= len;
+}
 
 static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFileName)
 {
@@ -2037,6 +2070,9 @@ static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFi
         CHECK( ZSTD_initDStream_usingDict(ress.dctx, dictBuffer, dictBufferSize) );
         free(dictBuffer);
     }
+
+    ress.buffer_fill_at_least = (buffer_fill_at_least_ptr) FIO_dress_buffer_fill_at_least;
+    ress.buffer_consume = (buffer_consume_ptr) FIO_dress_buffer_advance;
 
     return ress;
 }
@@ -2212,33 +2248,6 @@ FIO_zstdErrorHelp(const FIO_prefs_t* const prefs,
                     srcFileName, ZSTD_WINDOWLOG_MAX);
 }
 
-
-#define ERR_READ    (-1)
-#define ERR_MEMORY  (-2)
-
-static int UTIL_dress_buffer_fill_at_least(dRess_t *ress, FILE* srcFile, size_t len) {
-    if (len > ress->srcBufferSize) {
-        // TODO: better error handling
-        return ERR_MEMORY;
-    }
-    while(len > ress->srcBufferLoaded) {
-        size_t bytesRead = fread((char*)ress->srcBuffer + ress->srcBufferLoaded,
-                                 (size_t)1, len - ress->srcBufferLoaded, srcFile);
-        if(bytesRead == 0) {
-            // TODO: better error handling, perhaps return total read here?
-            return ERR_READ;
-        }
-        ress->srcBufferLoaded += bytesRead;
-    }
-    return 0;
-}
-
-static void UTIL_dress_buffer_advance(dRess_t *ress, size_t len) {
-    assert(len <= ress->srcBufferLoaded);
-    memmove(ress->srcBuffer, (char*)ress->srcBuffer + len, ress->srcBufferLoaded - len);
-    ress->srcBufferLoaded -= len;
-}
-
 /** FIO_decompressFrame() :
  *  @return : size of decoded zstd frame, or an error code
  */
@@ -2260,7 +2269,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress, FILE* finput,
     ZSTD_DCtx_reset(ress->dctx, ZSTD_reset_session_only);
 
     /* Header loading : ensures ZSTD_getFrameHeader() will succeed */
-    UTIL_dress_buffer_fill_at_least(ress, finput, ZSTD_FRAMEHEADERSIZE_MAX);
+    ress->buffer_fill_at_least(ress, finput, ZSTD_FRAMEHEADERSIZE_MAX);
 
 
     /* Main decompression Loop */
@@ -2296,14 +2305,14 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress, FILE* finput,
         }
 
         if (inBuff.pos > 0) {
-            UTIL_dress_buffer_advance(ress, inBuff.pos);
+            ress->buffer_consume(ress, inBuff.pos);
         }
 
         if (readSizeHint == 0) break;   /* end of frame */
 
         /* Fill input buffer */
         {   size_t const toDecode = MIN(readSizeHint, ress->srcBufferSize);  /* support large skippable frames */
-            if(UTIL_dress_buffer_fill_at_least(ress, finput, toDecode) < 0) {
+            if(ress->buffer_fill_at_least(ress, finput, toDecode) < 0) {
                 DISPLAYLEVEL(1, "%s : Read error (39) : premature end \n",
                              srcFileName);
                 return FIO_ERROR_FRAME_DECODING;
@@ -2346,8 +2355,8 @@ FIO_decompressGzFrame(dRess_t* ress, FILE* srcFile,
     for ( ; ; ) {
         int ret;
         if (strm.avail_in == 0) {
-            UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded);
-            UTIL_dress_buffer_fill_at_least(ress, srcFile, ress->srcBufferSize);
+            ress->buffer_consume(ress, ress->srcBufferLoaded);
+            ress->buffer_fill_at_least(ress, srcFile, ress->srcBufferSize);
             if (ress->srcBufferLoaded == 0) flush = Z_FINISH;
             strm.next_in = (z_const unsigned char*)ress->srcBuffer;
             strm.avail_in = (uInt)ress->srcBufferLoaded;
@@ -2372,8 +2381,7 @@ FIO_decompressGzFrame(dRess_t* ress, FILE* srcFile,
         if (ret == Z_STREAM_END) break;
     }
 
-    if (strm.avail_in > 0)
-        UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded - strm.avail_in);
+    ress->buffer_consume(ress, ress->srcBufferLoaded - strm.avail_in);
     if ( (inflateEnd(&strm) != Z_OK)  /* release resources ; error detected */
       && (decodingError==0) ) {
         DISPLAYLEVEL(1, "zstd: %s: inflateEnd error \n", srcFileName);
@@ -2448,8 +2456,7 @@ FIO_decompressLzmaFrame(dRess_t* ress, FILE* srcFile,
         if (ret == LZMA_STREAM_END) break;
     }
 
-    if (strm.avail_in > 0)
-        UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded - strm.avail_in);
+    UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded - strm.avail_in);
     ress->srcBufferLoaded = strm.avail_in;
     lzma_end(&strm);
     FIO_fwriteSparseEnd(prefs, ress->dstFile, storedSkips);
@@ -2565,7 +2572,7 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
         /* check magic number -> version */
         size_t const toRead = 4;
         const BYTE* const buf = (const BYTE*)ress.srcBuffer;
-        UTIL_dress_buffer_fill_at_least(&ress, srcFile, toRead);
+        ress.buffer_fill_at_least(&ress, srcFile, toRead);
         if (ress.srcBufferLoaded==0) {
             if (readSomething==0) {  /* srcFile is empty (which is invalid) */
                 DISPLAYLEVEL(1, "zstd: %s: unexpected end of file \n", srcFileName);
