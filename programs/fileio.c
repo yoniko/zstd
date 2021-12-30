@@ -2633,10 +2633,13 @@ static void* FIO_writer_thread_worker(void *args) {
     size_t buf_size = ZSTD_DStreamInSize() * 4;
     char *buf = malloc(buf_size);
     signal(SIGPIPE, SIG_IGN);
+    fcntl(params->pipeIn, F_SETFL, O_NONBLOCK);
     while(1) {
-        size_t read_bytes, written_bytes;
+        ssize_t read_bytes, written_bytes;
         read_bytes = read(params->pipeIn, buf, buf_size);
-        if (read_bytes <= 0)
+        if(read_bytes == -1 && errno == EAGAIN)
+            continue;
+        else if (read_bytes <= 0)
             break;
         written_bytes = fwrite(buf, 1, read_bytes, params->output);
         if (written_bytes != read_bytes)
