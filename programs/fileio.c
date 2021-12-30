@@ -2006,22 +2006,21 @@ int FIO_compressMultipleFilenames(FIO_ctx_t* const fCtx,
 #define ERR_READ    (-1)
 #define ERR_MEMORY  (-2)
 
-typedef int (*buffer_fill_at_least_ptr) (void *self, size_t len);
+typedef int (*buffer_read_ptr) (void *self, size_t len, ZSTD_inBuffer *out);
 typedef int (*buffer_consume_ptr) (void *self, size_t);
 typedef int (*set_source_file_ptr) (void *self,  FILE* srcFile);
+typedef void (*free_resources_ptr) (void *self);
 
 typedef struct {
-    void*  srcBuffer;
-    size_t srcBufferSize;
-    size_t srcBufferLoaded;
     void*  dstBuffer;
     size_t dstBufferSize;
     ZSTD_DStream* dctx;
     FILE* dstFile;
     FILE* srcFile;
-    buffer_fill_at_least_ptr bufferFillAtLeast;
+    buffer_read_ptr bufferRead;
     buffer_consume_ptr bufferConsume;
     set_source_file_ptr setSourceFile;
+    free_resources_ptr releaseReaderContext;
     void *readerContext;
 } dRess_t;
 
@@ -2044,43 +2043,63 @@ typedef struct {
 
     pthread_cond_t readerWaitCond;
     pthread_mutex_t readerWaitMutex;
+
+    pthread_cond_t decompressWaitCond;
+    pthread_mutex_t decompressWaitMutex;
 } asyncio_reader_context;
 
 
-static int FIO_dress_buffer_fill_at_least_async(dRess_t *ress, size_t len) {
-    asyncio_reader_context* const ctx = (asyncio_reader_context*) ress->readerContext;
-    if (len > ress->srcBufferSize) {
-        // TODO: better error handling
-        return ERR_MEMORY;
-    }
-    while(len > ress->srcBufferLoaded) {
-        size_t buffer_end = ctx->readerBufferCircularEnd;
-        size_t consecutive_buffer_end = buffer_end < (size_t) ctx->readerBufferCircularStart ?
-                                        ctx->readerBufferSize : buffer_end;
-        size_t bytesRead = MIN(consecutive_buffer_end - ctx->readerBufferCircularStart, len-ress->srcBufferLoaded);
-        if(bytesRead == 0 && ctx->threadState == THREAD_STATE_DONE) {
-            // TODO: better error handling, perhaps return total read here?
-            return ERR_READ;
-        }
+HINT_INLINE size_t FIO_circular_buffer_available_bytes_async(asyncio_reader_context *ctx) {
+    return ctx->readerBufferCircularEnd >= ctx->readerBufferCircularStart ?
+           ((size_t) ctx->readerBufferCircularEnd - (size_t) ctx->readerBufferCircularStart) :
+           ((size_t) ctx->readerBufferCircularEnd + ctx->readerBufferSize - (size_t) ctx->readerBufferCircularStart);
+}
 
-        memcpy((char*)ress->srcBuffer + ress->srcBufferLoaded, ctx->readerBuffer + ctx->readerBufferCircularStart,
-               bytesRead);
-        ctx->readerBufferCircularStart = (ctx->readerBufferCircularStart + (sig_atomic_t)bytesRead) %
-                                         (sig_atomic_t)ctx->readerBufferSize;
-        ress->srcBufferLoaded += bytesRead;
-        if(bytesRead > 0) {
-            ZSTD_pthread_mutex_lock(&ctx->readerWaitMutex);
-            ZSTD_pthread_cond_signal(&ctx->readerWaitCond);
-            ZSTD_pthread_mutex_unlock(&ctx->readerWaitMutex);
+static int FIO_dress_buffer_read_async(dRess_t *ress, size_t len, ZSTD_inBuffer *out) {
+    assert(len <= ZSTD_DStreamInSize());
+    assert(ress->readerContext != NULL);
+    asyncio_reader_context* const ctx = (asyncio_reader_context*) ress->readerContext;
+
+    // TODO: Possible race condition?
+    while(FIO_circular_buffer_available_bytes_async(ctx) < len && ctx->threadState != THREAD_STATE_DONE) {
+        ZSTD_pthread_mutex_lock(&ctx->decompressWaitMutex);
+        ZSTD_pthread_cond_wait(&ctx->decompressWaitCond, &ctx->decompressWaitMutex);
+        ZSTD_pthread_mutex_unlock(&ctx->decompressWaitMutex);
+    }
+
+    const size_t buffer_end = ctx->readerBufferCircularEnd;
+    const size_t consecutive_buffer_end = buffer_end < (size_t) ctx->readerBufferCircularStart ?
+            ctx->readerBufferSize : buffer_end;
+    const size_t available_consecutive_bytes = consecutive_buffer_end - ctx->readerBufferCircularStart;
+
+    out->pos = 0;
+    out->src = ctx->readerBuffer + ctx->readerBufferCircularStart;
+    out->size = len;
+    if(available_consecutive_bytes < len) {
+        if(buffer_end < (size_t) ctx->readerBufferCircularStart) {
+            // We are here only if we had enough bytes but not enough consecutive bytes which means we've wrapped around
+            // in such a case we copy to the scratch space at the end of the buffer.
+            assert(ctx->readerBufferCircularStart + available_consecutive_bytes == ctx->readerBufferSize);
+            size_t bytes_to_copy = MIN(buffer_end, len - available_consecutive_bytes);
+            assert(bytes_to_copy <= ZSTD_DStreamInSize());
+            memcpy(ctx->readerBuffer + ctx->readerBufferSize, ctx->readerBuffer, bytes_to_copy);
+            out->size = available_consecutive_bytes + bytes_to_copy;
+        } else {
+            out->size = buffer_end - (size_t)ctx->readerBufferCircularStart;
         }
     }
     return 0;
 }
 
 static void FIO_dress_buffer_consume_async(dRess_t *ress, size_t len) {
-    assert(len <= ress->srcBufferLoaded);
-    memmove(ress->srcBuffer, (char*)ress->srcBuffer + len, ress->srcBufferLoaded - len);
-    ress->srcBufferLoaded -= len;
+    assert(ress->readerContext != NULL);
+    asyncio_reader_context* const ctx = (asyncio_reader_context*) ress->readerContext;
+    assert(len <= FIO_circular_buffer_available_bytes_async(ctx));
+    ctx->readerBufferCircularStart = (ctx->readerBufferCircularStart + (sig_atomic_t)len) %
+                                     (sig_atomic_t)ctx->readerBufferSize;
+    ZSTD_pthread_mutex_lock(&ctx->readerWaitMutex);
+    ZSTD_pthread_cond_signal(&ctx->readerWaitCond);
+    ZSTD_pthread_mutex_unlock(&ctx->readerWaitMutex);
 }
 
 static void* FIO_dress_async_reader_thread(void *arg) {
@@ -2114,68 +2133,126 @@ static void* FIO_dress_async_reader_thread(void *arg) {
         }
         ctx->readerBufferCircularEnd = (ctx->readerBufferCircularEnd + (sig_atomic_t) bytes_read) %
                 (sig_atomic_t) ctx->readerBufferSize;
+        ZSTD_pthread_mutex_lock(&ctx->decompressWaitMutex);
+        ZSTD_pthread_cond_signal(&ctx->decompressWaitCond);
+        ZSTD_pthread_mutex_unlock(&ctx->decompressWaitMutex);
     }
+    ZSTD_pthread_mutex_lock(&ctx->decompressWaitMutex);
+    ZSTD_pthread_cond_signal(&ctx->decompressWaitCond);
+    ZSTD_pthread_mutex_unlock(&ctx->decompressWaitMutex);
     return NULL;
 }
 
+static void FIO_kill_reader_thread(asyncio_reader_context* ctx) {
+    ctx->threadState = THREAD_STATE_DONE;
+    ZSTD_pthread_mutex_lock(&ctx->readerWaitMutex);
+    ZSTD_pthread_cond_signal(&ctx->readerWaitCond);
+    ZSTD_pthread_mutex_unlock(&ctx->readerWaitMutex);
+    // TODO: error handling
+    ZSTD_pthread_join(ctx->thread, NULL);
+}
 
 static void FIO_set_source_file_async(dRess_t *ress, FILE* srcFile) {
     // TODO: Kill current thread
     asyncio_reader_context* const ctx = (asyncio_reader_context*) ress->readerContext;
+    if(ctx->threadState != THREAD_STATE_DONE)
+        FIO_kill_reader_thread(ctx);
     ress->srcFile = srcFile;
-    ress->srcBufferLoaded = 0;
     ctx->threadState = THREAD_STATE_INIT;
     // TODO: handle errors
     ZSTD_pthread_create(&ctx->thread, NULL, FIO_dress_async_reader_thread, (void *)ress);
 }
 
+static void FIO_release_reader_context_async(dRess_t *ress) {
+    assert(ress->readerContext != NULL);
+    asyncio_reader_context* ctx = (asyncio_reader_context*) ress->readerContext;
+    FIO_kill_reader_thread(ctx);
+    free(ctx->readerBuffer);
+    free(ctx);
+}
+
 static void FIO_dress_init_async_context(dRess_t *ress) {
     asyncio_reader_context *ctx = malloc(sizeof(asyncio_reader_context));
-    ctx->readerBufferSize = 4 * ZSTD_DStreamInSize();
-    ctx->readerBuffer = malloc(ctx->readerBufferSize);
+    ctx->readerBufferSize = 16 * ZSTD_DStreamInSize();
+    ctx->readerBuffer = malloc(ctx->readerBufferSize + ZSTD_DStreamInSize());
     ctx->readerBufferCircularStart = 0;
     ctx->readerBufferCircularEnd = 0;
-    ctx->threadState = THREAD_STATE_INIT;;
+    ctx->threadState = THREAD_STATE_DONE;;
     ress->readerContext = ctx;
 
     // TODO: handle errors
     ZSTD_pthread_mutex_init(&ctx->readerWaitMutex, NULL);
     ZSTD_pthread_cond_init(&ctx->readerWaitCond, NULL);
+    ZSTD_pthread_mutex_init(&ctx->decompressWaitMutex, NULL);
+    ZSTD_pthread_cond_init(&ctx->decompressWaitCond, NULL);
 
-    ress->bufferFillAtLeast = (buffer_fill_at_least_ptr) FIO_dress_buffer_fill_at_least_async;
+    ress->bufferRead = (buffer_read_ptr) FIO_dress_buffer_read_async;
     ress->bufferConsume = (buffer_consume_ptr) FIO_dress_buffer_consume_async;
     ress->setSourceFile = (set_source_file_ptr) FIO_set_source_file_async;
+    ress->releaseReaderContext = (free_resources_ptr ) FIO_release_reader_context_async;
 }
 
 #endif
 
-static int FIO_dress_buffer_fill_at_least(dRess_t *ress, const size_t len) {
+typedef struct {
+    void *srcBuffer;
+    size_t srcBufferSize;
+    size_t srcBufferLoaded;
+} sync_reader_context;
+
+static int FIO_dress_buffer_read(dRess_t *ress, const size_t len, ZSTD_inBuffer *out) {
     assert(ress->srcFile != NULL);
-    if (len > ress->srcBufferSize) {
+    assert(ress->readerContext != NULL);
+    int ret = 0;
+
+    sync_reader_context *ctx = (sync_reader_context*)ress->readerContext;
+    out->pos = 0;
+    out->size = 0;
+    out->src = NULL;
+
+    if (len > ctx->srcBufferSize) {
         // TODO: better error handling
         return ERR_MEMORY;
     }
-    while(len > ress->srcBufferLoaded) {
-        size_t bytesRead = fread((char*)ress->srcBuffer + ress->srcBufferLoaded,
-                                 (size_t)1, len - ress->srcBufferLoaded, ress->srcFile);
+    while(len > ctx->srcBufferLoaded) {
+        size_t bytesRead = fread((char*)ctx->srcBuffer + ctx->srcBufferLoaded,
+                                 (size_t)1, len - ctx->srcBufferLoaded, ress->srcFile);
         if(bytesRead == 0) {
             // TODO: better error handling, perhaps return total read here?
-            return ERR_READ;
+             ret = ERR_READ;
+             break;
         }
-        ress->srcBufferLoaded += bytesRead;
+        ctx->srcBufferLoaded += bytesRead;
     }
-    return 0;
+    out->pos = 0;
+    out->size = ctx->srcBufferLoaded;
+    out->src = ctx->srcBuffer;
+    return ret;
 }
 
 static void FIO_dress_buffer_consume(dRess_t *ress, const size_t len) {
-    assert(len <= ress->srcBufferLoaded);
-    memmove(ress->srcBuffer, (char*)ress->srcBuffer + len, ress->srcBufferLoaded - len);
-    ress->srcBufferLoaded -= len;
+    assert(ress->readerContext != NULL);
+    sync_reader_context *ctx = (sync_reader_context*)ress->readerContext;
+
+    assert(len <= ctx->srcBufferLoaded);
+    memmove(ctx->srcBuffer, (char*)ctx->srcBuffer + len, ctx->srcBufferLoaded - len);
+    ctx->srcBufferLoaded -= len;
 }
 
 static void FIO_set_source_file(dRess_t *ress, FILE* srcFile) {
+    assert(ress->readerContext != NULL);
+    sync_reader_context *ctx = (sync_reader_context*)ress->readerContext;
+
     ress->srcFile = srcFile;
-    ress->srcBufferLoaded = 0;
+    ctx->srcBufferLoaded = 0;
+}
+
+static void FIO_release_reader_context(dRess_t *ress) {
+    assert(ress->readerContext != NULL);
+    sync_reader_context *ctx = (sync_reader_context*)ress->readerContext;
+    free(ctx->srcBuffer);
+    free(ress->readerContext);
+    ress->readerContext = NULL;
 }
 
 static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFileName)
@@ -2193,11 +2270,9 @@ static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFi
     CHECK( ZSTD_DCtx_setMaxWindowSize(ress.dctx, prefs->memLimit) );
     CHECK( ZSTD_DCtx_setParameter(ress.dctx, ZSTD_d_forceIgnoreChecksum, !prefs->checksumFlag));
 
-    ress.srcBufferSize = ZSTD_DStreamInSize();
-    ress.srcBuffer = malloc(ress.srcBufferSize);
     ress.dstBufferSize = ZSTD_DStreamOutSize();
     ress.dstBuffer = malloc(ress.dstBufferSize);
-    if (!ress.srcBuffer || !ress.dstBuffer)
+    if (!ress.dstBuffer)
         EXM_THROW(61, "Allocation error : not enough memory");
 
     /* dictionary */
@@ -2207,10 +2282,24 @@ static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFi
         free(dictBuffer);
     }
 
-    if(!prefs->asyncIO) {
-        ress.bufferFillAtLeast = (buffer_fill_at_least_ptr) FIO_dress_buffer_fill_at_least;
+#ifdef ZSTD_MULTITHREAD
+    if(!prefs->asyncIO)
+#endif
+    {
+        // TODO: Move to an init function
+        // TODO: handle malloc error
+        sync_reader_context  *ctx = malloc(sizeof(sync_reader_context));
+        ctx->srcBufferSize = ZSTD_DStreamInSize();
+        ctx->srcBufferLoaded = 0;
+        ctx->srcBuffer = malloc(ctx->srcBufferSize);
+        if (!ctx->srcBuffer)
+            EXM_THROW(61, "Allocation error : not enough memory");
+        ress.readerContext = ctx;
+
+        ress.bufferRead = (buffer_read_ptr) FIO_dress_buffer_read;
         ress.bufferConsume = (buffer_consume_ptr) FIO_dress_buffer_consume;
         ress.setSourceFile = (set_source_file_ptr) FIO_set_source_file;
+        ress.releaseReaderContext = (free_resources_ptr ) FIO_release_reader_context;
     }
 #ifdef ZSTD_MULTITHREAD
     else {
@@ -2224,8 +2313,7 @@ static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFi
 static void FIO_freeDResources(dRess_t ress)
 {
     CHECK( ZSTD_freeDStream(ress.dctx) );
-    free(ress.srcBuffer);
-    free(ress.dstBuffer);
+    ress.releaseReaderContext(&ress);
 }
 
 
@@ -2365,17 +2453,19 @@ static int FIO_passThrough(const FIO_prefs_t* const prefs,
  * detailed error message when requested window size is too large */
 static void
 FIO_zstdErrorHelp(const FIO_prefs_t* const prefs,
-                  const dRess_t* ress,
+                  dRess_t* ress,
                   size_t err, const char* srcFileName)
 {
     ZSTD_frameHeader header;
+    ZSTD_inBuffer inBuff;
 
     /* Help message only for one specific error */
     if (ZSTD_getErrorCode(err) != ZSTD_error_frameParameter_windowTooLarge)
         return;
 
     /* Try to decode the frame header */
-    err = ZSTD_getFrameHeader(&header, ress->srcBuffer, ress->srcBufferLoaded);
+    ress->bufferRead(ress, ZSTD_FRAMEHEADERSIZE_MAX, &inBuff);
+    err = ZSTD_getFrameHeader(&header, inBuff.src, inBuff.size);
     if (err == 0) {
         unsigned long long const windowSize = header.windowSize;
         unsigned const windowLog = FIO_highbit64(windowSize) + ((windowSize & (windowSize - 1)) != 0);
@@ -2405,6 +2495,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress,
 {
     U64 frameSize = 0;
     U32 storedSkips = 0;
+    ZSTD_inBuffer inBuff;
 
     /* display last 20 characters only */
     {   size_t const srcFileLength = strlen(srcFileName);
@@ -2414,12 +2505,11 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress,
     ZSTD_DCtx_reset(ress->dctx, ZSTD_reset_session_only);
 
     /* Header loading : ensures ZSTD_getFrameHeader() will succeed */
-    ress->bufferFillAtLeast(ress, ZSTD_FRAMEHEADERSIZE_MAX);
+    ress->bufferRead(ress, ZSTD_FRAMEHEADERSIZE_MAX, &inBuff);
 
 
     /* Main decompression Loop */
     while (1) {
-        ZSTD_inBuffer  inBuff = { ress->srcBuffer, ress->srcBufferLoaded, 0 };
         ZSTD_outBuffer outBuff= { ress->dstBuffer, ress->dstBufferSize, 0 };
         size_t const readSizeHint = ZSTD_decompressStream(ress->dctx, &outBuff, &inBuff);
         const int displayLevel = (!fCtx->hasStdoutOutput || g_display_prefs.progressSetting == FIO_ps_always) ? 1 : 2;
@@ -2456,8 +2546,9 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress,
         if (readSizeHint == 0) break;   /* end of frame */
 
         /* Fill input buffer */
-        {   size_t const toDecode = MIN(readSizeHint, ress->srcBufferSize);  /* support large skippable frames */
-            if(ress->bufferFillAtLeast(ress, toDecode) < 0) {
+        {
+            size_t const toDecode = MIN(readSizeHint, ZSTD_DStreamInSize());  /* support large skippable frames */
+            if(ress->bufferRead(ress, toDecode, &inBuff) < 0) {
                 DISPLAYLEVEL(1, "%s : Read error (39) : premature end \n",
                              srcFileName);
                 return FIO_ERROR_FRAME_DECODING;
@@ -2482,6 +2573,7 @@ FIO_decompressGzFrame(dRess_t* ress,
     int flush = Z_NO_FLUSH;
     int decodingError = 0;
     unsigned storedSkips = 0;
+    ZSTD_inBuffer inBuf;
 
     strm.zalloc = Z_NULL;
     strm.zfree = Z_NULL;
@@ -2494,17 +2586,18 @@ FIO_decompressGzFrame(dRess_t* ress,
 
     strm.next_out = (Bytef*)ress->dstBuffer;
     strm.avail_out = (uInt)ress->dstBufferSize;
-    strm.avail_in = (uInt)ress->srcBufferLoaded;
-    strm.next_in = (z_const unsigned char*)ress->srcBuffer;
+    strm.avail_in = 0;
+    strm.next_in = NULL;
+    inBuf.size = 0;
 
     for ( ; ; ) {
         int ret;
         if (strm.avail_in == 0) {
-            ress->bufferConsume(ress, ress->srcBufferLoaded);
-            ress->bufferFillAtLeast(ress, ress->srcBufferSize);
-            if (ress->srcBufferLoaded == 0) flush = Z_FINISH;
-            strm.next_in = (z_const unsigned char*)ress->srcBuffer;
-            strm.avail_in = (uInt)ress->srcBufferLoaded;
+            ress->bufferConsume(ress, inBuf.size);
+            ress->bufferRead(ress, ZSTD_DStreamInSize(), &inBuf);
+            if (inBuf.size == 0) flush = Z_FINISH;
+            strm.next_in = (z_const unsigned char*)inBuf.src;
+            strm.avail_in = (uInt)inBuf.size;
         }
         ret = inflate(&strm, flush);
         if (ret == Z_BUF_ERROR) {
@@ -2526,7 +2619,7 @@ FIO_decompressGzFrame(dRess_t* ress,
         if (ret == Z_STREAM_END) break;
     }
 
-    ress->bufferConsume(ress, ress->srcBufferLoaded - strm.avail_in);
+    ress->bufferConsume(ress, inBuf.size - strm.avail_in);
     if ( (inflateEnd(&strm) != Z_OK)  /* release resources ; error detected */
       && (decodingError==0) ) {
         DISPLAYLEVEL(1, "zstd: %s: inflateEnd error \n", srcFileName);
@@ -2709,14 +2802,15 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
 {
     unsigned readSomething = 0;
     unsigned long long filesize = 0;
+    ZSTD_inBuffer inBuff;
 
     /* for each frame */
     for ( ; ; ) {
         /* check magic number -> version */
         size_t const toRead = 4;
-        const BYTE* const buf = (const BYTE*)ress.srcBuffer;
-        ress.bufferFillAtLeast(&ress, toRead);
-        if (ress.srcBufferLoaded==0) {
+        ress.bufferRead(&ress, toRead, &inBuff);
+        const BYTE* const buf = (const BYTE*)inBuff.src;
+        if (inBuff.size==0) {
             if (readSomething==0) {  /* srcFile is empty (which is invalid) */
                 DISPLAYLEVEL(1, "zstd: %s: unexpected end of file \n", srcFileName);
                 return 1;
@@ -2724,11 +2818,11 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
             break;   /* no more input */
         }
         readSomething = 1;   /* there is at least 1 byte in srcFile */
-        if (ress.srcBufferLoaded < toRead) {
+        if (inBuff.size < toRead) {
             DISPLAYLEVEL(1, "zstd: %s: unknown header \n", srcFileName);
             return 1;
         }
-        if (ZSTD_isFrame(buf, ress.srcBufferLoaded)) {
+        if (ZSTD_isFrame(buf, inBuff.size)) {
             unsigned long long const frameSize = FIO_decompressZstdFrame(fCtx, &ress, prefs, srcFileName, filesize);
             if (frameSize == FIO_ERROR_FRAME_DECODING) return 1;
             filesize += frameSize;
@@ -2761,10 +2855,10 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
             return 1;
 #endif
         } else if ((prefs->overwrite) && !strcmp (dstFileName, stdoutmark)) {  /* pass-through mode */
+            // TODO: fix call after fixing FIO_passThrough
             return FIO_passThrough(prefs,
                                    ress.dstFile, ress.srcFile,
-                                   ress.srcBuffer, ress.srcBufferSize,
-                                   ress.srcBufferLoaded);
+                                   NULL, 0, 0);
         } else {
             DISPLAYLEVEL(1, "zstd: %s: unsupported format \n", srcFileName);
             return 1;
