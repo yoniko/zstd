@@ -325,6 +325,7 @@ struct FIO_prefs_s {
     /* IO preferences */
     U32 removeSrcFile;
     U32 overwrite;
+    U32 asyncIO;
 
     /* Computation resources preferences */
     unsigned memLimit;
@@ -395,6 +396,7 @@ FIO_prefs_t* FIO_createPreferences(void)
     ret->literalCompressionMode = ZSTD_ps_auto;
     ret->excludeCompressedFiles = 0;
     ret->allowBlockDevices = 0;
+    ret->asyncIO = 0;
     return ret;
 }
 
@@ -556,6 +558,10 @@ void FIO_setPatchFromMode(FIO_prefs_t* const prefs, int value)
 void FIO_setContentSize(FIO_prefs_t* const prefs, int value)
 {
     prefs->contentSize = value != 0;
+}
+
+void FIO_setAsyncIOFlag(FIO_prefs_t* const prefs, unsigned value) {
+    prefs->asyncIO = value;
 }
 
 /* FIO_ctx_t functions */
