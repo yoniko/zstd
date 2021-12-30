@@ -2620,6 +2620,49 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
     return 0;
 }
 
+#ifdef ZSTD_MULTITHREAD
+#include "../lib/common/threading.h"
+
+typedef struct {
+    FILE *output;
+    int pipeIn;
+} writer_params_t;
+
+static void* FIO_writer_thread_worker(void *args) {
+    writer_params_t *params = (writer_params_t*) args;
+    size_t buf_size = ZSTD_DStreamInSize() * 4;
+    char *buf = malloc(buf_size);
+    signal(SIGPIPE, SIG_IGN);
+    while(1) {
+        size_t read_bytes, written_bytes;
+        read_bytes = read(params->pipeIn, buf, buf_size);
+        if (read_bytes <= 0)
+            break;
+        written_bytes = fwrite(buf, 1, read_bytes, params->output);
+        if (written_bytes != read_bytes)
+            break;
+    }
+    close(params->pipeIn);
+    return NULL;
+}
+
+static FILE* FIO_create_writer_thread(ZSTD_pthread_t* thread, FILE *foutput) {
+    int pipefd[2];
+    writer_params_t *params;
+    if (pipe(pipefd) == -1) {
+        // TODO: handle error
+        return NULL;
+    }
+    params = malloc(sizeof(writer_params_t));
+    params->output = foutput;
+    params->pipeIn = pipefd[0];
+    // TODO: handle errors
+    ZSTD_pthread_create(thread, NULL, FIO_writer_thread_worker, (void *)params);
+    return fdopen(pipefd[1], "wb");
+}
+
+#endif
+
 /** FIO_decompressDstFile() :
     open `dstFileName`,
     or path-through if ress.dstFile is already != 0,
@@ -2639,6 +2682,7 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
 
     if ((ress.dstFile == NULL) && (prefs->testMode==0)) {
         int dstFilePermissions = DEFAULT_FILE_PERMISSIONS;
+        ZSTD_pthread_t thread;
         if ( strcmp(srcFileName, stdinmark)   /* special case : don't transfer permissions from stdin */
           && UTIL_stat(srcFileName, &statbuf)
           && UTIL_isRegularFileStat(&statbuf) ) {
@@ -2656,6 +2700,8 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
          * and the user presses Ctrl-C when asked if they wish to overwrite.
          */
         addHandler(dstFileName);
+        if(prefs->asyncIO)
+            ress.dstFile = FIO_create_writer_thread(&thread, ress.dstFile);
     }
 
     result = FIO_decompressFrames(fCtx, ress, srcFile, prefs, dstFileName, srcFileName);
@@ -2683,6 +2729,49 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
     return result;
 }
 
+#ifdef ZSTD_MULTITHREAD
+#include "../lib/common/threading.h"
+
+typedef struct {
+    FILE *input;
+    int pipeOut;
+} reader_params_t;
+
+static void* FIO_reader_thread_worker(void *args) {
+    reader_params_t *params = (reader_params_t*)args;
+    size_t buf_size = ZSTD_DStreamInSize() * 4;
+    char *buf = malloc(buf_size);
+    signal(SIGPIPE, SIG_IGN);
+    while(1) {
+        size_t read_bytes, written_bytes;
+        read_bytes = fread(buf, 1, buf_size, params->input);
+        if (read_bytes == 0)
+            break;
+        written_bytes = write(params->pipeOut, buf, read_bytes);
+        if (written_bytes != read_bytes)
+            break;
+    }
+    close(params->pipeOut);
+    return NULL;
+}
+
+static FILE* FIO_create_reader_thread(ZSTD_pthread_t* thread, FILE *finput) {
+    int pipefd[2];
+    reader_params_t *params;
+    if (pipe(pipefd) == -1) {
+        // TODO: handle error
+        return NULL;
+    }
+    params = malloc(sizeof(reader_params_t));
+    params->input = finput;
+    params->pipeOut = pipefd[1];
+    // TODO: handle errors
+    ZSTD_pthread_create(thread, NULL, FIO_reader_thread_worker, (void *)params);
+    return fdopen(pipefd[0], "rb");
+}
+
+#endif
+
 
 /** FIO_decompressSrcFile() :
     Open `srcFileName`, transfer control to decompressDstFile()
@@ -2693,6 +2782,10 @@ static int FIO_decompressSrcFile(FIO_ctx_t* const fCtx, FIO_prefs_t* const prefs
 {
     FILE* srcFile;
     int result;
+#ifdef ZSTD_MULTITHREAD
+    ZSTD_pthread_t readerThread;
+    FILE *originalSrcFile = NULL;
+#endif
 
     if (UTIL_isDirectory(srcFileName)) {
         DISPLAYLEVEL(1, "zstd: %s is a directory -- ignored \n", srcFileName);
@@ -2703,9 +2796,26 @@ static int FIO_decompressSrcFile(FIO_ctx_t* const fCtx, FIO_prefs_t* const prefs
     if (srcFile==NULL) return 1;
     ress.srcBufferLoaded = 0;
 
+#ifdef ZSTD_MULTITHREAD
+    if(prefs->asyncIO) {
+        originalSrcFile = srcFile;
+        srcFile = FIO_create_reader_thread(&readerThread, srcFile);
+        if(!srcFile) {
+            srcFile = originalSrcFile;
+            originalSrcFile = NULL;
+        }
+    }
+#endif
+
     result = FIO_decompressDstFile(fCtx, prefs, ress, srcFile, dstFileName, srcFileName);
 
     /* Close file */
+#ifdef ZSTD_MULTITHREAD
+    if(originalSrcFile) {
+        fclose(srcFile);
+        srcFile = originalSrcFile;
+    }
+#endif
     if (fclose(srcFile)) {
         DISPLAYLEVEL(1, "zstd: %s: %s \n", srcFileName, strerror(errno));  /* error should not happen */
         return 1;
