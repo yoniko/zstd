@@ -396,8 +396,7 @@ FIO_prefs_t* FIO_createPreferences(void)
     ret->literalCompressionMode = ZSTD_ps_auto;
     ret->excludeCompressedFiles = 0;
     ret->allowBlockDevices = 0;
-    // TODO: Default should be 0, also control with flag
-    ret->asyncIO = 1;
+    ret->asyncIO = 0;
     return ret;
 }
 
@@ -559,6 +558,10 @@ void FIO_setPatchFromMode(FIO_prefs_t* const prefs, int value)
 void FIO_setContentSize(FIO_prefs_t* const prefs, int value)
 {
     prefs->contentSize = value != 0;
+}
+
+void FIO_setAsyncIOFlag(FIO_prefs_t* const prefs, unsigned value) {
+    prefs->asyncIO = value;
 }
 
 /* FIO_ctx_t functions */
@@ -2643,6 +2646,7 @@ FIO_decompressLzmaFrame(dRess_t* ress,
     lzma_ret initRet;
     int decodingError = 0;
     unsigned storedSkips = 0;
+    ZSTD_inBuffer inBuf;
 
     strm.next_in = 0;
     strm.avail_in = 0;
@@ -2661,17 +2665,17 @@ FIO_decompressLzmaFrame(dRess_t* ress,
 
     strm.next_out = (BYTE*)ress->dstBuffer;
     strm.avail_out = ress->dstBufferSize;
-    strm.next_in = (BYTE const*)ress->srcBuffer;
-    strm.avail_in = ress->srcBufferLoaded;
+    strm.next_in = NULL;
+    strm.avail_in = 0;
 
     for ( ; ; ) {
         lzma_ret ret;
         if (strm.avail_in == 0) {
-            UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded);
-            UTIL_dress_buffer_fill_at_least(ress, ress->srcBufferSize);
-            if (ress->srcBufferLoaded == 0) action = LZMA_FINISH;
-            strm.next_in = (BYTE const*)ress->srcBuffer;
-            strm.avail_in = ress->srcBufferLoaded;
+            ress->bufferConsume(ress, inBuf.size);
+            ress->bufferRead(ress, ZSTD_DStreamInSize(), &inBuf);
+            if (inBuf.size == 0) action = LZMA_FINISH;
+            strm.next_in = (z_const unsigned char*)inBuf.src;
+            strm.avail_in = (uInt)inBuf.size;
         }
         ret = lzma_code(&strm, action);
 
@@ -2694,8 +2698,7 @@ FIO_decompressLzmaFrame(dRess_t* ress,
         if (ret == LZMA_STREAM_END) break;
     }
 
-    UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded - strm.avail_in);
-    ress->srcBufferLoaded = strm.avail_in;
+    ress->bufferConsume(ress, inBuf.size - strm.avail_in);
     lzma_end(&strm);
     FIO_fwriteSparseEnd(prefs, ress->dstFile, storedSkips);
     return decodingError ? FIO_ERROR_FRAME_DECODING : outFileSize;
@@ -2714,17 +2717,18 @@ FIO_decompressLz4Frame(dRess_t* ress,
     LZ4F_errorCode_t const errorCode = LZ4F_createDecompressionContext(&dCtx, LZ4F_VERSION);
     int decodingError = 0;
     unsigned storedSkips = 0;
+    ZSTD_inBuffer inBuff;
 
     if (LZ4F_isError(errorCode)) {
         DISPLAYLEVEL(1, "zstd: failed to create lz4 decompression context \n");
         return FIO_ERROR_FRAME_DECODING;
     }
 
-    /* Init feed with magic number (already consumed from FILE* sFile) */
     {   size_t inSize = 4;
         size_t outSize= 0;
-        MEM_writeLE32(ress->srcBuffer, LZ4_MAGICNUMBER);
-        nextToLoad = LZ4F_decompress(dCtx, ress->dstBuffer, &outSize, ress->srcBuffer, &inSize, NULL);
+        ress->bufferRead(ress, 4, &inBuff);
+        nextToLoad = LZ4F_decompress(dCtx, ress->dstBuffer, &outSize, inBuff.src, &inSize, NULL);
+        ress->bufferConsume(ress, 4);
         if (LZ4F_isError(nextToLoad)) {
             DISPLAYLEVEL(1, "zstd: %s: lz4 header error : %s \n",
                             srcFileName, LZ4F_getErrorName(nextToLoad));
@@ -2739,17 +2743,17 @@ FIO_decompressLz4Frame(dRess_t* ress,
         size_t decodedBytes = ress->dstBufferSize;
 
         /* Read input */
-        if (nextToLoad > ress->srcBufferSize) nextToLoad = ress->srcBufferSize;
-        UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded);
-        UTIL_dress_buffer_fill_at_least(ress, ress->srcBufferSize);
-        readSize = ress->srcBufferLoaded;
+        if (nextToLoad > ZSTD_DStreamInSize()) nextToLoad = ZSTD_DStreamInSize();
+        ress->bufferConsume(ress, inBuff.size);
+        ress->bufferRead(ress, nextToLoad, &inBuff);
+        readSize = inBuff.size;
         if (!readSize) break;   /* reached end of file or stream */
 
         while ((pos < readSize) || (decodedBytes == ress->dstBufferSize)) {  /* still to read, or still to flush */
             /* Decode Input (at least partially) */
             size_t remaining = readSize - pos;
             decodedBytes = ress->dstBufferSize;
-            nextToLoad = LZ4F_decompress(dCtx, ress->dstBuffer, &decodedBytes, (char*)(ress->srcBuffer)+pos, &remaining, NULL);
+            nextToLoad = LZ4F_decompress(dCtx, ress->dstBuffer, &decodedBytes, (char*)(inBuff.src)+pos, &remaining, NULL);
             if (LZ4F_isError(nextToLoad)) {
                 DISPLAYLEVEL(1, "zstd: %s: lz4 decompression error : %s \n",
                                 srcFileName, LZ4F_getErrorName(nextToLoad));
@@ -2781,7 +2785,7 @@ FIO_decompressLz4Frame(dRess_t* ress,
     }
 
     LZ4F_freeDecompressionContext(dCtx);
-    UTIL_dress_buffer_advance(ress, ress->srcBufferLoaded); /* LZ4F will reach exact frame boundary */
+    ress->bufferConsume(ress, inBuff.size); /* LZ4F will reach exact frame boundary */
     FIO_fwriteSparseEnd(prefs, ress->dstFile, storedSkips);
 
     return decodingError ? FIO_ERROR_FRAME_DECODING : filesize;
