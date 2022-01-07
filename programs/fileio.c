@@ -726,6 +726,7 @@ FIO_openDstFile(FIO_ctx_t* fCtx, FIO_prefs_t* const prefs,
         if (f == NULL) {
             DISPLAYLEVEL(1, "zstd: %s: %s\n", dstFileName, strerror(errno));
         }
+        setvbuf(f, NULL, _IOFBF, 1024*1024);
         return f;
     }
 }
