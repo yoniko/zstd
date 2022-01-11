@@ -973,7 +973,13 @@ typedef struct {
 static write_job_t *FIO_createWriteJob(write_pool_ctx_t *ctx) {
     void *buffer;
     write_job_t *job;
-    size_t bufferSize = MAX(ZSTD_DStreamOutSize(), ZSTD_CStreamOutSize());
+    size_t bufferSize = 0;
+#ifndef ZSTD_NOCOMPRESS
+    bufferSize = ZSTD_CStreamOutSize();
+#endif
+#ifndef ZSTD_NODECOMPRESS
+    bufferSize = MAX(bufferSize, ZSTD_DStreamOutSize());
+#endif
     job = (write_job_t*) malloc(sizeof(write_job_t));
     buffer = malloc(bufferSize);
     if(!job || !buffer)
