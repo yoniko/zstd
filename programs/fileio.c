@@ -1047,7 +1047,7 @@ typedef struct {
     FILE* dstFile;
     unsigned storedSkips;
 
-    /* The jobs and availableWriteJobs fields are access by both the main and writer threads and should
+    /* The jobs and availableWriteJobs fields are accessed by both the main and writer threads and should
      * only be mutated after locking the mutex */
     ZSTD_pthread_mutex_t writeJobsMutex;
     void* jobs[MAX_WRITE_JOBS];
@@ -1055,7 +1055,7 @@ typedef struct {
 } write_pool_ctx_t;
 
 typedef struct {
-    /* These fields are automaically set and shouldn't be changed by non WritePool code. */
+    /* These fields are automatically set and shouldn't be changed by non WritePool code. */
     write_pool_ctx_t *ctx;
     FILE* dstFile;
     void *buffer;
