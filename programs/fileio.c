@@ -934,6 +934,104 @@ static int FIO_removeMultiFilesWarning(FIO_ctx_t* const fCtx, const FIO_prefs_t*
     return error;
 }
 
+/** FIO_fwriteSparse() :
+*  @return : storedSkips,
+*            argument for next call to FIO_fwriteSparse() or FIO_fwriteSparseEnd() */
+static unsigned
+FIO_fwriteSparse(FILE* file,
+                 const void* buffer, size_t bufferSize,
+                 const FIO_prefs_t* const prefs,
+                 unsigned storedSkips)
+{
+    const size_t* const bufferT = (const size_t*)buffer;   /* Buffer is supposed malloc'ed, hence aligned on size_t */
+    size_t bufferSizeT = bufferSize / sizeof(size_t);
+    const size_t* const bufferTEnd = bufferT + bufferSizeT;
+    const size_t* ptrT = bufferT;
+    static const size_t segmentSizeT = (32 KB) / sizeof(size_t);   /* check every 32 KB */
+
+    if (prefs->testMode) return 0;  /* do not output anything in test mode */
+
+    if (!prefs->sparseFileSupport) {  /* normal write */
+        size_t const sizeCheck = fwrite(buffer, 1, bufferSize, file);
+        if (sizeCheck != bufferSize)
+        EXM_THROW(70, "Write error : cannot write decoded block : %s",
+                  strerror(errno));
+        return 0;
+    }
+
+    /* avoid int overflow */
+    if (storedSkips > 1 GB) {
+        if (LONG_SEEK(file, 1 GB, SEEK_CUR) != 0)
+        EXM_THROW(91, "1 GB skip error (sparse file support)");
+        storedSkips -= 1 GB;
+    }
+
+    while (ptrT < bufferTEnd) {
+        size_t nb0T;
+
+        /* adjust last segment if < 32 KB */
+        size_t seg0SizeT = segmentSizeT;
+        if (seg0SizeT > bufferSizeT) seg0SizeT = bufferSizeT;
+        bufferSizeT -= seg0SizeT;
+
+        /* count leading zeroes */
+        for (nb0T=0; (nb0T < seg0SizeT) && (ptrT[nb0T] == 0); nb0T++) ;
+        storedSkips += (unsigned)(nb0T * sizeof(size_t));
+
+        if (nb0T != seg0SizeT) {   /* not all 0s */
+            size_t const nbNon0ST = seg0SizeT - nb0T;
+            /* skip leading zeros */
+            if (LONG_SEEK(file, storedSkips, SEEK_CUR) != 0)
+            EXM_THROW(92, "Sparse skip error ; try --no-sparse");
+            storedSkips = 0;
+            /* write the rest */
+            if (fwrite(ptrT + nb0T, sizeof(size_t), nbNon0ST, file) != nbNon0ST)
+            EXM_THROW(93, "Write error : cannot write decoded block : %s",
+                      strerror(errno));
+        }
+        ptrT += seg0SizeT;
+    }
+
+    {   static size_t const maskT = sizeof(size_t)-1;
+        if (bufferSize & maskT) {
+            /* size not multiple of sizeof(size_t) : implies end of block */
+            const char* const restStart = (const char*)bufferTEnd;
+            const char* restPtr = restStart;
+            const char* const restEnd = (const char*)buffer + bufferSize;
+            assert(restEnd > restStart && restEnd < restStart + sizeof(size_t));
+            for ( ; (restPtr < restEnd) && (*restPtr == 0); restPtr++) ;
+            storedSkips += (unsigned) (restPtr - restStart);
+            if (restPtr != restEnd) {
+                /* not all remaining bytes are 0 */
+                size_t const restSize = (size_t)(restEnd - restPtr);
+                if (LONG_SEEK(file, storedSkips, SEEK_CUR) != 0)
+                EXM_THROW(92, "Sparse skip error ; try --no-sparse");
+                if (fwrite(restPtr, 1, restSize, file) != restSize)
+                EXM_THROW(95, "Write error : cannot write end of decoded block : %s",
+                          strerror(errno));
+                storedSkips = 0;
+            }   }   }
+
+    return storedSkips;
+}
+
+static void
+FIO_fwriteSparseEnd(const FIO_prefs_t* const prefs, FILE* file, unsigned storedSkips)
+{
+    if (prefs->testMode) assert(storedSkips == 0);
+    if (storedSkips>0) {
+        assert(prefs->sparseFileSupport > 0);  /* storedSkips>0 implies sparse support is enabled */
+        (void)prefs;   /* assert can be disabled, in which case prefs becomes unused */
+        if (LONG_SEEK(file, storedSkips-1, SEEK_CUR) != 0)
+        EXM_THROW(69, "Final skip error (sparse file support)");
+        /* last zero must be explicitly written,
+         * so that skipped ones get implicitly translated as zero by FS */
+        {   const char lastZeroByte[1] = { 0 };
+            if (fwrite(lastZeroByte, 1, 1, file) != 1)
+            EXM_THROW(69, "Write error : cannot write last zero : %s", strerror(errno));
+        }   }
+}
+
 /* **********************************************************************
  *  AsyncIO functionality
  ************************************************************************/
@@ -1053,104 +1151,6 @@ static void WritePool_free(write_pool_ctx_t* ctx) {
         free(job);
     }
     free(ctx);
-}
-
-/** FIO_fwriteSparse() :
-*  @return : storedSkips,
-*            argument for next call to FIO_fwriteSparse() or FIO_fwriteSparseEnd() */
-static unsigned
-FIO_fwriteSparse(FILE* file,
-                 const void* buffer, size_t bufferSize,
-                 const FIO_prefs_t* const prefs,
-                 unsigned storedSkips)
-{
-    const size_t* const bufferT = (const size_t*)buffer;   /* Buffer is supposed malloc'ed, hence aligned on size_t */
-    size_t bufferSizeT = bufferSize / sizeof(size_t);
-    const size_t* const bufferTEnd = bufferT + bufferSizeT;
-    const size_t* ptrT = bufferT;
-    static const size_t segmentSizeT = (32 KB) / sizeof(size_t);   /* check every 32 KB */
-
-    if (prefs->testMode) return 0;  /* do not output anything in test mode */
-
-    if (!prefs->sparseFileSupport) {  /* normal write */
-        size_t const sizeCheck = fwrite(buffer, 1, bufferSize, file);
-        if (sizeCheck != bufferSize)
-        EXM_THROW(70, "Write error : cannot write decoded block : %s",
-                  strerror(errno));
-        return 0;
-    }
-
-    /* avoid int overflow */
-    if (storedSkips > 1 GB) {
-        if (LONG_SEEK(file, 1 GB, SEEK_CUR) != 0)
-        EXM_THROW(91, "1 GB skip error (sparse file support)");
-        storedSkips -= 1 GB;
-    }
-
-    while (ptrT < bufferTEnd) {
-        size_t nb0T;
-
-        /* adjust last segment if < 32 KB */
-        size_t seg0SizeT = segmentSizeT;
-        if (seg0SizeT > bufferSizeT) seg0SizeT = bufferSizeT;
-        bufferSizeT -= seg0SizeT;
-
-        /* count leading zeroes */
-        for (nb0T=0; (nb0T < seg0SizeT) && (ptrT[nb0T] == 0); nb0T++) ;
-        storedSkips += (unsigned)(nb0T * sizeof(size_t));
-
-        if (nb0T != seg0SizeT) {   /* not all 0s */
-            size_t const nbNon0ST = seg0SizeT - nb0T;
-            /* skip leading zeros */
-            if (LONG_SEEK(file, storedSkips, SEEK_CUR) != 0)
-            EXM_THROW(92, "Sparse skip error ; try --no-sparse");
-            storedSkips = 0;
-            /* write the rest */
-            if (fwrite(ptrT + nb0T, sizeof(size_t), nbNon0ST, file) != nbNon0ST)
-            EXM_THROW(93, "Write error : cannot write decoded block : %s",
-                      strerror(errno));
-        }
-        ptrT += seg0SizeT;
-    }
-
-    {   static size_t const maskT = sizeof(size_t)-1;
-        if (bufferSize & maskT) {
-            /* size not multiple of sizeof(size_t) : implies end of block */
-            const char* const restStart = (const char*)bufferTEnd;
-            const char* restPtr = restStart;
-            const char* const restEnd = (const char*)buffer + bufferSize;
-            assert(restEnd > restStart && restEnd < restStart + sizeof(size_t));
-            for ( ; (restPtr < restEnd) && (*restPtr == 0); restPtr++) ;
-            storedSkips += (unsigned) (restPtr - restStart);
-            if (restPtr != restEnd) {
-                /* not all remaining bytes are 0 */
-                size_t const restSize = (size_t)(restEnd - restPtr);
-                if (LONG_SEEK(file, storedSkips, SEEK_CUR) != 0)
-                EXM_THROW(92, "Sparse skip error ; try --no-sparse");
-                if (fwrite(restPtr, 1, restSize, file) != restSize)
-                EXM_THROW(95, "Write error : cannot write end of decoded block : %s",
-                          strerror(errno));
-                storedSkips = 0;
-            }   }   }
-
-    return storedSkips;
-}
-
-static void
-FIO_fwriteSparseEnd(const FIO_prefs_t* const prefs, FILE* file, unsigned storedSkips)
-{
-    if (prefs->testMode) assert(storedSkips == 0);
-    if (storedSkips>0) {
-        assert(prefs->sparseFileSupport > 0);  /* storedSkips>0 implies sparse support is enabled */
-        (void)prefs;   /* assert can be disabled, in which case prefs becomes unused */
-        if (LONG_SEEK(file, storedSkips-1, SEEK_CUR) != 0)
-        EXM_THROW(69, "Final skip error (sparse file support)");
-        /* last zero must be explicitly written,
-         * so that skipped ones get implicitly translated as zero by FS */
-        {   const char lastZeroByte[1] = { 0 };
-            if (fwrite(lastZeroByte, 1, 1, file) != 1)
-            EXM_THROW(69, "Write error : cannot write last zero : %s", strerror(errno));
-        }   }
 }
 
 /* WritePool_releaseWriteJob:
