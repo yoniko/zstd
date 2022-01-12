@@ -239,9 +239,12 @@ static void usage_advanced(const char* programName)
 #ifndef ZSTD_NODECOMPRESS
     DISPLAYOUT( "\n");
     DISPLAYOUT( "Advanced decompression arguments : \n");
-    DISPLAYOUT( " -l     : print information about zstd compressed files \n");
-    DISPLAYOUT( "--test  : test compressed file integrity \n");
-    DISPLAYOUT( " -M#    : Set a memory usage limit for decompression \n");
+    DISPLAYOUT( " -l        : print information about zstd compressed files \n");
+    DISPLAYOUT( "--test     : test compressed file integrity \n");
+    DISPLAYOUT( " -M#       : Set a memory usage limit for decompression \n");
+#ifdef ZSTD_MULTITHREAD
+    DISPLAYOUT( "--asyncio  : use threaded asynchronous IO for source file(s) reading \n");
+#endif
 # if ZSTD_SPARSE_DEFAULT
     DISPLAYOUT( "--[no-]sparse : sparse mode (default: enabled on file, disabled on stdout) \n");
 # else
@@ -999,6 +1002,9 @@ int main(int argCount, const char* argv[])
                         defaultLogicalCores = 1;
                     continue;
                 }
+#ifndef ZSTD_NODECOMPRESS
+                if (longCommandWArg(&argument, "--asyncio")) { FIO_setAsyncIOFlag(prefs, 1); continue;}
+#endif
 #endif
 #ifdef UTIL_HAS_MIRRORFILELIST
                 if (longCommandWArg(&argument, "--output-dir-mirror")) { NEXT_FIELD(outMirroredDirName); continue; }
