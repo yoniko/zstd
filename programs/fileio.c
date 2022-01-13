@@ -1035,41 +1035,58 @@ FIO_fwriteSparseEnd(const FIO_prefs_t* const prefs, FILE* file, unsigned storedS
 /* **********************************************************************
  *  AsyncIO functionality
  ************************************************************************/
-#define MAX_WRITE_JOBS    (10)
+#define MAX_IO_JOBS          (10)
 
 typedef struct {
     /* These struct fields should be set only on creation and not changed afterwards */
-    POOL_ctx* writerPool;
-    int totalWriteJobs;
+    POOL_ctx* threadPool;
+    int totalIoJobs;
     FIO_prefs_t* prefs;
+    POOL_function poolFunction;
 
     /* Controls the file we currently write to, make changes only by using provided utility functions */
-    FILE* dstFile;
-    unsigned storedSkips;
+    FILE* file;
+    unsigned storedSkips; // only used for write io pool
+    U64 offset;
 
-    /* The jobs and availableWriteJobs fields are accessed by both the main and writer threads and should
+    /* The jobs and availableIoJobs fields are accessed by both the main and writer threads and should
      * only be mutated after locking the mutex */
-    ZSTD_pthread_mutex_t writeJobsMutex;
-    void* jobs[MAX_WRITE_JOBS];
-    int availableWriteJobs;
-} write_pool_ctx_t;
+    ZSTD_pthread_mutex_t ioJobsMutex;
+    void* jobs[MAX_IO_JOBS];
+    int availableIoJobs;
+} io_pool_ctx_t;
 
 typedef struct {
     /* These fields are automatically set and shouldn't be changed by non WritePool code. */
-    write_pool_ctx_t *ctx;
-    FILE* dstFile;
+    io_pool_ctx_t *ctx;
+    FILE* file;
     void *buffer;
     size_t bufferSize;
 
     /* This field should be changed before a job is queued for execution and should contain the number
      * of bytes to write from the buffer. */
     size_t usedBufferSize;
-} write_job_t;
+    U64 offset;
+} io_job_t;
 
 
-static write_job_t *FIO_createWriteJob(write_pool_ctx_t *ctx) {
+static io_job_t *FIO_createIoJob(io_pool_ctx_t *ctx, size_t bufferSize) {
     void *buffer;
-    write_job_t *job;
+    io_job_t *job;
+    job = (io_job_t*) malloc(sizeof(io_job_t));
+    buffer = malloc(bufferSize);
+    if(!job || !buffer)
+    EXM_THROW(101, "Allocation error : not enough memory");
+    job->buffer = buffer;
+    job->bufferSize = bufferSize;
+    job->usedBufferSize = 0;
+    job->file = NULL;
+    job->ctx = ctx;
+    job->offset = 0;
+    return job;
+}
+
+static io_job_t *FIO_createWriteJob(io_pool_ctx_t *ctx) {
     size_t bufferSize = 0;
 #ifndef ZSTD_NOCOMPRESS
     bufferSize = ZSTD_CStreamOutSize();
@@ -1077,180 +1094,183 @@ static write_job_t *FIO_createWriteJob(write_pool_ctx_t *ctx) {
 #ifndef ZSTD_NODECOMPRESS
     bufferSize = MAX(bufferSize, ZSTD_DStreamOutSize());
 #endif
-    job = (write_job_t*) malloc(sizeof(write_job_t));
-    buffer = malloc(bufferSize);
-    if(!job || !buffer)
-    EXM_THROW(101, "Allocation error : not enough memory");
-    job->buffer = buffer;
-    job->bufferSize = bufferSize;
-    job->usedBufferSize = 0;
-    job->dstFile = NULL;
-    job->ctx = ctx;
-    return job;
+    return FIO_createIoJob(ctx, bufferSize);
 }
 
-
-/* WritePool_createThreadPool:
- * Creates a thread pool and a mutex for threaded write pool.
+/* IO_createThreadPool:
+ * Creates a thread pool and a mutex for threaded IO pool.
  * Displays warning if asyncio is requested but MT isn't available. */
-static void WritePool_createThreadPool(write_pool_ctx_t *ctx, const FIO_prefs_t *prefs) {
-    ctx->writerPool = NULL;
+static void IO_createThreadPool(io_pool_ctx_t *ctx, const FIO_prefs_t *prefs) {
+    ctx->threadPool = NULL;
     if(prefs->asyncIO) {
 #ifdef ZSTD_MULTITHREAD
-        if (ZSTD_pthread_mutex_init(&ctx->writeJobsMutex, NULL))
+        if (ZSTD_pthread_mutex_init(&ctx->ioJobsMutex, NULL))
         EXM_THROW(102, "Failed creating write jobs mutex");
-        /* We want MAX_WRITE_JOBS-2 queue items because we need to always have 1 free buffer to
+        /* We want MAX_IO_JOBS-2 queue items because we need to always have 1 free buffer to
          * decompress into and 1 buffer that's actively written to disk and owned by the writing thread. */
-        assert(MAX_WRITE_JOBS >= 2);
-        ctx->writerPool = POOL_create(1, MAX_WRITE_JOBS - 2);
-        if (!ctx->writerPool)
+        assert(MAX_IO_JOBS >= 2);
+        ctx->threadPool = POOL_create(1, MAX_IO_JOBS - 2);
+        if (!ctx->threadPool)
         EXM_THROW(103, "Failed creating writer thread pool");
 #else
+        /* TODO: move this error message */
         DISPLAYLEVEL(2, "Note : asyncio decompression is disabled (lack of multithreading support) \n");
 #endif
     }
 }
 
-/* WritePool_create:
+/* IoPool_create:
  * Allocates and sets and a new write pool including its included jobs. */
-static write_pool_ctx_t* WritePool_create(FIO_prefs_t* const prefs) {
-    write_pool_ctx_t *ctx;
+static io_pool_ctx_t* IoPool_create(FIO_prefs_t* const prefs, POOL_function poolFunction) {
+    io_pool_ctx_t *ctx;
     int i;
-    ctx = (write_pool_ctx_t*) malloc(sizeof(write_pool_ctx_t));
+    ctx = (io_pool_ctx_t*) malloc(sizeof(io_pool_ctx_t));
     if(!ctx)
     EXM_THROW(100, "Allocation error : not enough memory");
-    WritePool_createThreadPool(ctx, prefs);
+    IO_createThreadPool(ctx, prefs);
     ctx->prefs = prefs;
-    ctx->totalWriteJobs = ctx->writerPool ? MAX_WRITE_JOBS : 1;
-    ctx->availableWriteJobs = ctx->totalWriteJobs;
-    for(i=0; i < ctx->availableWriteJobs; i++) {
+    ctx->poolFunction = poolFunction;
+    ctx->totalIoJobs = ctx->threadPool ? MAX_IO_JOBS : 1;
+    ctx->availableIoJobs = ctx->totalIoJobs;
+    for(i=0; i < ctx->availableIoJobs; i++) {
         ctx->jobs[i] = FIO_createWriteJob(ctx);
     }
     ctx->storedSkips = 0;
-    ctx->dstFile = NULL;
+    ctx->offset = 0;
+    ctx->file = NULL;
     return ctx;
 }
 
-/* WritePool_free:
+/* IoPool_free:
  * Release a previously allocated write thread pool. Makes sure all takss are done and released. */
-static void WritePool_free(write_pool_ctx_t* ctx) {
+static void IoPool_free(io_pool_ctx_t* ctx) {
     int i=0;
-    if(ctx->writerPool) {
+    if(ctx->threadPool) {
         /* Make sure we finish all tasks and then free the resources */
-        POOL_joinJobs(ctx->writerPool);
+        POOL_joinJobs(ctx->threadPool);
         /* Make sure we are not leaking jobs */
-        assert(ctx->availableWriteJobs==ctx->totalWriteJobs);
-        POOL_free(ctx->writerPool);
-        ZSTD_pthread_mutex_destroy(&ctx->writeJobsMutex);
+        assert(ctx->availableIoJobs == ctx->totalIoJobs);
+        POOL_free(ctx->threadPool);
+        ZSTD_pthread_mutex_destroy(&ctx->ioJobsMutex);
     }
-    assert(ctx->dstFile==NULL);
+    assert(ctx->file == NULL);
     assert(ctx->storedSkips==0);
-    for(i=0; i<ctx->availableWriteJobs; i++) {
-        write_job_t* job = (write_job_t*) ctx->jobs[i];
+    for(i=0; i<ctx->availableIoJobs; i++) {
+        io_job_t* job = (io_job_t*) ctx->jobs[i];
         free(job->buffer);
         free(job);
     }
     free(ctx);
 }
 
-/* WritePool_releaseWriteJob:
+/* IoPool_releaseWriteJob:
  * Releases an acquired job back to the pool. Doesn't execute the job. */
-static void WritePool_releaseWriteJob(write_job_t *job) {
-    write_pool_ctx_t *ctx = job->ctx;
-    if(ctx->writerPool) {
-        ZSTD_pthread_mutex_lock(&ctx->writeJobsMutex);
-        assert(ctx->availableWriteJobs < MAX_WRITE_JOBS);
-        ctx->jobs[ctx->availableWriteJobs++] = job;
-        ZSTD_pthread_mutex_unlock(&ctx->writeJobsMutex);
+static void IoPool_releaseWriteJob(io_job_t *job) {
+    io_pool_ctx_t *ctx = job->ctx;
+    if(ctx->threadPool) {
+        ZSTD_pthread_mutex_lock(&ctx->ioJobsMutex);
+        assert(ctx->availableIoJobs < MAX_IO_JOBS);
+        ctx->jobs[ctx->availableIoJobs++] = job;
+        ZSTD_pthread_mutex_unlock(&ctx->ioJobsMutex);
     } else {
-        ctx->availableWriteJobs++;
+        ctx->availableIoJobs++;
     }
 }
 
-/* WritePool_acquireWriteJob:
+/* IoPool_acquireJob:
  * Returns an available write job to be used for a future write. */
-static write_job_t* WritePool_acquireWriteJob(write_pool_ctx_t *ctx) {
-    write_job_t *job;
-    assert(ctx->dstFile!=NULL || ctx->prefs->testMode);
-    if(ctx->writerPool) {
-        ZSTD_pthread_mutex_lock(&ctx->writeJobsMutex);
-        assert(ctx->availableWriteJobs > 0);
-        job = (write_job_t*) ctx->jobs[--ctx->availableWriteJobs];
-        ZSTD_pthread_mutex_unlock(&ctx->writeJobsMutex);
+static io_job_t* IoPool_acquireJob(io_pool_ctx_t *ctx) {
+    io_job_t *job;
+    assert(ctx->file != NULL || ctx->prefs->testMode);
+    if(ctx->threadPool) {
+        ZSTD_pthread_mutex_lock(&ctx->ioJobsMutex);
+        assert(ctx->availableIoJobs > 0);
+        job = (io_job_t*) ctx->jobs[--ctx->availableIoJobs];
+        ZSTD_pthread_mutex_unlock(&ctx->ioJobsMutex);
     } else {
-        assert(ctx->availableWriteJobs==1);
-        ctx->availableWriteJobs--;
-        job = (write_job_t*)ctx->jobs[0];
+        assert(ctx->availableIoJobs == 1);
+        ctx->availableIoJobs--;
+        job = (io_job_t*)ctx->jobs[0];
     }
     job->usedBufferSize = 0;
-    job->dstFile = ctx->dstFile;
+    job->file = ctx->file;
+    job->offset = ctx->offset;
     return job;
 }
 
 /* WritePool_executeWriteJob:
  * Executes a write job synchronously. Can be used as a function for a thread pool. */
 static void WritePool_executeWriteJob(void* opaque){
-    write_job_t* job = (write_job_t*) opaque;
-    write_pool_ctx_t* ctx = job->ctx;
-    ctx->storedSkips = FIO_fwriteSparse(job->dstFile, job->buffer, job->usedBufferSize, ctx->prefs, ctx->storedSkips);
-    WritePool_releaseWriteJob(job);
+    io_job_t* job = (io_job_t*) opaque;
+    io_pool_ctx_t* ctx = job->ctx;
+    ctx->storedSkips = FIO_fwriteSparse(job->file, job->buffer, job->usedBufferSize, ctx->prefs, ctx->storedSkips);
+    IoPool_releaseWriteJob(job);
 }
 
-/* WritePool_queueWriteJob:
+/* IoPool_create:
+ * Allocates and sets and a new write pool including its included jobs. */
+static io_pool_ctx_t* WritePool_create(FIO_prefs_t* const prefs) {
+    return IoPool_create(prefs, WritePool_executeWriteJob);
+}
+
+/* IoPool_queueJob:
  * Queues a write job for execution.
  * Make sure to set `usedBufferSize` to the wanted length before call.
  * The queued job shouldn't be used directly after queueing it. */
-static void WritePool_queueWriteJob(write_job_t *job) {
-    write_pool_ctx_t* ctx = job->ctx;
-    if(ctx->writerPool)
-        POOL_add(ctx->writerPool, WritePool_executeWriteJob, job);
+static void IoPool_queueJob(io_job_t *job) {
+    io_pool_ctx_t* ctx = job->ctx;
+    assert(job->offset == ctx->offset);
+    ctx->offset += job->usedBufferSize;
+    if(ctx->threadPool)
+        POOL_add(ctx->threadPool, WritePool_executeWriteJob, job);
     else
         WritePool_executeWriteJob(job);
 }
 
-/* WritePool_queueAndReacquireWriteJob:
+/* IoPool_queueAndReacquireWriteJob:
  * Queues a write job for execution and acquires a new one.
  * After execution `job`'s pointed value would change to the newly acquired job.
  * Make sure to set `usedBufferSize` to the wanted length before call.
  * The queued job shouldn't be used directly after queueing it. */
-static void WritePool_queueAndReacquireWriteJob(write_job_t **job) {
-    WritePool_queueWriteJob(*job);
-    *job = WritePool_acquireWriteJob((*job)->ctx);
+static void IoPool_queueAndReacquireWriteJob(io_job_t **job) {
+    IoPool_queueJob(*job);
+    *job = IoPool_acquireJob((*job)->ctx);
 }
 
 /* WritePool_sparseWriteEnd:
- * Ends sparse writes to the current dstFile.
+ * Ends sparse writes to the current file.
  * Blocks on completion of all current write jobs before executing. */
-static void WritePool_sparseWriteEnd(write_pool_ctx_t* ctx) {
+static void WritePool_sparseWriteEnd(io_pool_ctx_t* ctx) {
     assert(ctx != NULL);
-    if(ctx->writerPool)
-        POOL_joinJobs(ctx->writerPool);
-    FIO_fwriteSparseEnd(ctx->prefs, ctx->dstFile, ctx->storedSkips);
+    if(ctx->threadPool)
+        POOL_joinJobs(ctx->threadPool);
+    FIO_fwriteSparseEnd(ctx->prefs, ctx->file, ctx->storedSkips);
     ctx->storedSkips = 0;
 }
 
-/* WritePool_setDstFile:
+/* IoPool_setFile:
  * Sets the destination file for future files in the pool.
  * Requires completion of all queues write jobs and release of all otherwise acquired jobs.
  * Also requires ending of sparse write if a previous file was used in sparse mode. */
-static void WritePool_setDstFile(write_pool_ctx_t *ctx, FILE* dstFile) {
+static void IoPool_setFile(io_pool_ctx_t *ctx, FILE* dstFile) {
     assert(ctx!=NULL);
     /* We can change the dst file only if we have finished writing */
-    if(ctx->writerPool)
-        POOL_joinJobs(ctx->writerPool);
+    if(ctx->threadPool)
+        POOL_joinJobs(ctx->threadPool);
     assert(ctx->storedSkips == 0);
-    assert(ctx->availableWriteJobs == ctx->totalWriteJobs);
-    ctx->dstFile = dstFile;
+    assert(ctx->availableIoJobs == ctx->totalIoJobs);
+    ctx->file = dstFile;
+    ctx->offset = 0;
 }
 
 /* WritePool_closeDstFile:
- * Ends sparse write and closes the writePool's current dstFile and sets the dstFile to NULL.
+ * Ends sparse write and closes the writePool's current file and sets the file to NULL.
  * Requires completion of all queues write jobs and release of all otherwise acquired jobs.  */
-static int WritePool_closeDstFile(write_pool_ctx_t *ctx) {
-    FILE *dstFile = ctx->dstFile;
+static int WritePool_closeDstFile(io_pool_ctx_t *ctx) {
+    FILE *dstFile = ctx->file;
     assert(dstFile!=NULL || ctx->prefs->testMode!=0);
     WritePool_sparseWriteEnd(ctx);
-    WritePool_setDstFile(ctx, NULL);
+    IoPool_setFile(ctx, NULL);
     return fclose(dstFile);
 }
 
@@ -1268,7 +1288,7 @@ typedef struct {
     size_t dictBufferSize;
     const char* dictFileName;
     ZSTD_CStream* cctx;
-    write_pool_ctx_t *writePoolCtx;
+    io_pool_ctx_t *writePoolCtx;
 } cRess_t;
 
 /** ZSTD_cycleLog() :
@@ -1395,7 +1415,7 @@ static void FIO_freeCResources(const cRess_t* const ress)
 {
     free(ress->srcBuffer);
     free(ress->dictBuffer);
-    WritePool_free(ress->writePoolCtx);
+    IoPool_free(ress->writePoolCtx);
     ZSTD_freeCStream(ress->cctx);   /* never fails */
 }
 
@@ -1408,7 +1428,7 @@ FIO_compressGzFrame(const cRess_t* ress,  /* buffers & handlers are used, but no
 {
     unsigned long long inFileSize = 0, outFileSize = 0;
     z_stream strm;
-    write_job_t *writeJob = NULL;
+    io_job_t *writeJob = NULL;
 
     if (compressionLevel > Z_BEST_COMPRESSION)
         compressionLevel = Z_BEST_COMPRESSION;
@@ -1424,7 +1444,7 @@ FIO_compressGzFrame(const cRess_t* ress,  /* buffers & handlers are used, but no
             EXM_THROW(71, "zstd: %s: deflateInit2 error %d \n", srcFileName, ret);
     }   }
 
-    writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    writeJob = IoPool_acquireJob(ress->writePoolCtx);
     strm.next_in = 0;
     strm.avail_in = 0;
     strm.next_out = (Bytef*)writeJob->buffer;
@@ -1445,7 +1465,7 @@ FIO_compressGzFrame(const cRess_t* ress,  /* buffers & handlers are used, but no
         {   size_t const cSize = writeJob->bufferSize - strm.avail_out;
             if (cSize) {
                 writeJob->usedBufferSize = cSize;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 outFileSize += cSize;
                 strm.next_out = (Bytef*)writeJob->buffer;
                 strm.avail_out = (uInt)writeJob->bufferSize;
@@ -1465,7 +1485,7 @@ FIO_compressGzFrame(const cRess_t* ress,  /* buffers & handlers are used, but no
         {   size_t const cSize = writeJob->bufferSize - strm.avail_out;
             if (cSize) {
                 writeJob->usedBufferSize = cSize;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 outFileSize += cSize;
                 strm.next_out = (Bytef*)writeJob->buffer;
                 strm.avail_out = (uInt)writeJob->bufferSize;
@@ -1480,7 +1500,7 @@ FIO_compressGzFrame(const cRess_t* ress,  /* buffers & handlers are used, but no
             EXM_THROW(79, "zstd: %s: deflateEnd error %d \n", srcFileName, ret);
     }   }
     *readsize = inFileSize;
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
     return outFileSize;
 }
@@ -1497,7 +1517,7 @@ FIO_compressLzmaFrame(cRess_t* ress,
     lzma_stream strm = LZMA_STREAM_INIT;
     lzma_action action = LZMA_RUN;
     lzma_ret ret;
-    write_job_t *writeJob = NULL;
+    io_job_t *writeJob = NULL;
 
     if (compressionLevel < 0) compressionLevel = 0;
     if (compressionLevel > 9) compressionLevel = 9;
@@ -1515,7 +1535,7 @@ FIO_compressLzmaFrame(cRess_t* ress,
             EXM_THROW(83, "zstd: %s: lzma_easy_encoder error %d", srcFileName, ret);
     }
 
-    writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    writeJob = IoPool_acquireJob(ress->writePoolCtx);
     strm.next_out = (Bytef*)writeJob->buffer;
     strm.avail_out = (uInt)writeJob->bufferSize;
     strm.next_in = 0;
@@ -1537,7 +1557,7 @@ FIO_compressLzmaFrame(cRess_t* ress,
         {   size_t const compBytes = writeJob->bufferSize - strm.avail_out;
             if (compBytes) {
                 writeJob->usedBufferSize = compBytes;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 outFileSize += compBytes;
                 strm.next_out = (Bytef*)writeJob->buffer;
                 strm.avail_out = writeJob->bufferSize;
@@ -1556,7 +1576,7 @@ FIO_compressLzmaFrame(cRess_t* ress,
     lzma_end(&strm);
     *readsize = inFileSize;
 
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
 
     return outFileSize;
@@ -1584,7 +1604,7 @@ FIO_compressLz4Frame(cRess_t* ress,
     LZ4F_preferences_t prefs;
     LZ4F_compressionContext_t ctx;
 
-    write_job_t *writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    io_job_t *writeJob = IoPool_acquireJob(ress->writePoolCtx);
 
     LZ4F_errorCode_t const errorCode = LZ4F_createCompressionContext(&ctx, LZ4F_VERSION);
     if (LZ4F_isError(errorCode))
@@ -1653,13 +1673,13 @@ FIO_compressLz4Frame(cRess_t* ress,
                         srcFileName, LZ4F_getErrorName(headerSize));
 
         writeJob->usedBufferSize = headerSize;
-        WritePool_queueAndReacquireWriteJob(&writeJob);
+        IoPool_queueAndReacquireWriteJob(&writeJob);
         outFileSize += headerSize;
     }
 
     *readsize = inFileSize;
     LZ4F_freeCompressionContext(ctx);
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
 
     return outFileSize;
@@ -1676,7 +1696,7 @@ FIO_compressZstdFrame(FIO_ctx_t* const fCtx,
 {
     cRess_t const ress = *ressPtr;
     FILE* const srcFile = ress.srcFile;
-    write_job_t *writeJob = WritePool_acquireWriteJob(ressPtr->writePoolCtx);
+    io_job_t *writeJob = IoPool_acquireJob(ressPtr->writePoolCtx);
 
     U64 compressedfilesize = 0;
     ZSTD_EndDirective directive = ZSTD_e_continue;
@@ -1749,7 +1769,7 @@ FIO_compressZstdFrame(FIO_ctx_t* const fCtx,
                             (unsigned)directive, (unsigned)inBuff.pos, (unsigned)inBuff.size, (unsigned)outBuff.pos);
             if (outBuff.pos) {
                 writeJob->usedBufferSize = outBuff.pos;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 compressedfilesize += outBuff.pos;
             }
 
@@ -1889,7 +1909,7 @@ FIO_compressZstdFrame(FIO_ctx_t* const fCtx,
                 (unsigned long long)*readsize, (unsigned long long)fileSize);
     }
 
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ressPtr->writePoolCtx);
 
     return compressedfilesize;
@@ -1992,7 +2012,7 @@ FIO_compressFilename_internal(FIO_ctx_t* const fCtx,
 
 
 /*! FIO_compressFilename_dstFile() :
- *  open dstFileName, or pass-through if ress.dstFile != NULL,
+ *  open dstFileName, or pass-through if ress.file != NULL,
  *  then start compression with FIO_compressFilename_internal().
  *  Manages source removal (--rm) and file permissions transfer.
  *  note : ress.srcFile must be != NULL,
@@ -2013,7 +2033,7 @@ static int FIO_compressFilename_dstFile(FIO_ctx_t* const fCtx,
     int transferMTime = 0;
     FILE *dstFile;
     assert(ress.srcFile != NULL);
-    if (ress.writePoolCtx->dstFile == NULL) {
+    if (ress.writePoolCtx->file == NULL) {
         int dstFilePermissions = DEFAULT_FILE_PERMISSIONS;
         if ( strcmp (srcFileName, stdinmark)
           && strcmp (dstFileName, stdoutmark)
@@ -2027,7 +2047,7 @@ static int FIO_compressFilename_dstFile(FIO_ctx_t* const fCtx,
         DISPLAYLEVEL(6, "FIO_compressFilename_dstFile: opening dst: %s \n", dstFileName);
         dstFile = FIO_openDstFile(fCtx, prefs, srcFileName, dstFileName, dstFilePermissions);
         if (dstFile==NULL) return 1;  /* could not open dstFileName */
-        WritePool_setDstFile(ress.writePoolCtx, dstFile);
+        IoPool_setFile(ress.writePoolCtx, dstFile);
         /* Must only be added after FIO_openDstFile() succeeds.
          * Otherwise we may delete the destination file if it already exists,
          * and the user presses Ctrl-C when asked if they wish to overwrite.
@@ -2041,7 +2061,7 @@ static int FIO_compressFilename_dstFile(FIO_ctx_t* const fCtx,
         clearHandler();
 
         DISPLAYLEVEL(6, "FIO_compressFilename_dstFile: closing dst: %s \n", dstFileName);
-        if (WritePool_closeDstFile(ress.writePoolCtx)) { /* error closing dstFile */
+        if (WritePool_closeDstFile(ress.writePoolCtx)) { /* error closing file */
             DISPLAYLEVEL(1, "zstd: %s: %s \n", dstFileName, strerror(errno));
             result=1;
         }
@@ -2272,7 +2292,7 @@ int FIO_compressMultipleFilenames(FIO_ctx_t* const fCtx,
         if (dstFile == NULL) {  /* could not open outFileName */
             error = 1;
         } else {
-            WritePool_setDstFile(ress.writePoolCtx, dstFile);
+            IoPool_setFile(ress.writePoolCtx, dstFile);
             for (; fCtx->currFileIdx < fCtx->nbFilesTotal; ++fCtx->currFileIdx) {
                 status = FIO_compressFilename_srcFile(fCtx, prefs, ress, outFileName, inFileNamesTable[fCtx->currFileIdx], compressionLevel);
                 if (!status) fCtx->nbFilesProcessed++;
@@ -2341,7 +2361,7 @@ typedef struct {
     size_t srcBufferSize;
     size_t srcBufferLoaded;
     ZSTD_DStream* dctx;
-    write_pool_ctx_t *writePoolCtx;
+    io_pool_ctx_t *writePoolCtx;
 } dRess_t;
 
 static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFileName)
@@ -2380,7 +2400,7 @@ static void FIO_freeDResources(dRess_t ress)
 {
     CHECK( ZSTD_freeDStream(ress.dctx) );
     free(ress.srcBuffer);
-    WritePool_free(ress.writePoolCtx);
+    IoPool_free(ress.writePoolCtx);
 }
 
 /* FIO_consumeDSrcBuffer:
@@ -2466,7 +2486,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress, FILE* finput,
                         U64 alreadyDecoded)  /* for multi-frames streams */
 {
     U64 frameSize = 0;
-    write_job_t *writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    io_job_t *writeJob = IoPool_acquireJob(ress->writePoolCtx);
 
     /* display last 20 characters only */
     {   size_t const srcFileLength = strlen(srcFileName);
@@ -2499,7 +2519,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress, FILE* finput,
 
         /* Write block */
         writeJob->usedBufferSize = outBuff.pos;
-        WritePool_queueAndReacquireWriteJob(&writeJob);
+        IoPool_queueAndReacquireWriteJob(&writeJob);
         frameSize += outBuff.pos;
         if (fCtx->nbFilesTotal > 1) {
             size_t srcFileNameSize = strlen(srcFileName);
@@ -2534,7 +2554,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress, FILE* finput,
                 ress->srcBufferLoaded += readSize;
     }   }   }
 
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
 
     return frameSize;
@@ -2549,7 +2569,7 @@ FIO_decompressGzFrame(dRess_t* ress, FILE* srcFile, const char* srcFileName)
     z_stream strm;
     int flush = Z_NO_FLUSH;
     int decodingError = 0;
-    write_job_t *writeJob = NULL;
+    io_job_t *writeJob = NULL;
 
     strm.zalloc = Z_NULL;
     strm.zfree = Z_NULL;
@@ -2560,7 +2580,7 @@ FIO_decompressGzFrame(dRess_t* ress, FILE* srcFile, const char* srcFileName)
     if (inflateInit2(&strm, 15 /* maxWindowLogSize */ + 16 /* gzip only */) != Z_OK)
         return FIO_ERROR_FRAME_DECODING;
 
-    writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    writeJob = IoPool_acquireJob(ress->writePoolCtx);
     strm.next_out = (Bytef*)writeJob->buffer;
     strm.avail_out = (uInt)writeJob->bufferSize;
     strm.avail_in = (uInt)ress->srcBufferLoaded;
@@ -2586,7 +2606,7 @@ FIO_decompressGzFrame(dRess_t* ress, FILE* srcFile, const char* srcFileName)
         {   size_t const decompBytes = writeJob->bufferSize - strm.avail_out;
             if (decompBytes) {
                 writeJob->usedBufferSize = decompBytes;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 outFileSize += decompBytes;
                 strm.next_out = (Bytef*)writeJob->buffer;
                 strm.avail_out = (uInt)writeJob->bufferSize;
@@ -2602,7 +2622,7 @@ FIO_decompressGzFrame(dRess_t* ress, FILE* srcFile, const char* srcFileName)
         DISPLAYLEVEL(1, "zstd: %s: inflateEnd error \n", srcFileName);
         decodingError = 1;
     }
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
     return decodingError ? FIO_ERROR_FRAME_DECODING : outFileSize;
 }
@@ -2619,7 +2639,7 @@ FIO_decompressLzmaFrame(dRess_t* ress, FILE* srcFile,
     lzma_action action = LZMA_RUN;
     lzma_ret initRet;
     int decodingError = 0;
-    write_job_t *writeJob = NULL;
+    io_job_t *writeJob = NULL;
 
     strm.next_in = 0;
     strm.avail_in = 0;
@@ -2636,7 +2656,7 @@ FIO_decompressLzmaFrame(dRess_t* ress, FILE* srcFile,
         return FIO_ERROR_FRAME_DECODING;
     }
 
-    writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    writeJob = IoPool_acquireJob(ress->writePoolCtx);
     strm.next_out = (Bytef*)writeJob->buffer;
     strm.avail_out = (uInt)writeJob->bufferSize;
     strm.next_in = (BYTE const*)ress->srcBuffer;
@@ -2664,7 +2684,7 @@ FIO_decompressLzmaFrame(dRess_t* ress, FILE* srcFile,
         {   size_t const decompBytes = writeJob->bufferSize - strm.avail_out;
             if (decompBytes) {
                 writeJob->usedBufferSize = decompBytes;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 outFileSize += decompBytes;
                 strm.next_out = (Bytef*)writeJob->buffer;
                 strm.avail_out = writeJob->bufferSize;
@@ -2674,7 +2694,7 @@ FIO_decompressLzmaFrame(dRess_t* ress, FILE* srcFile,
 
     FIO_consumeDSrcBuffer(ress, ress->srcBufferLoaded - strm.avail_in);
     lzma_end(&strm);
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
     return decodingError ? FIO_ERROR_FRAME_DECODING : outFileSize;
 }
@@ -2690,7 +2710,7 @@ FIO_decompressLz4Frame(dRess_t* ress, FILE* srcFile,
     LZ4F_decompressionContext_t dCtx;
     LZ4F_errorCode_t const errorCode = LZ4F_createDecompressionContext(&dCtx, LZ4F_VERSION);
     int decodingError = 0;
-    write_job_t *writeJob = WritePool_acquireWriteJob(ress->writePoolCtx);
+    io_job_t *writeJob = IoPool_acquireJob(ress->writePoolCtx);
 
     if (LZ4F_isError(errorCode)) {
         DISPLAYLEVEL(1, "zstd: failed to create lz4 decompression context \n");
@@ -2733,7 +2753,7 @@ FIO_decompressLz4Frame(dRess_t* ress, FILE* srcFile,
             if (decodedBytes) {
                 UTIL_HumanReadableSize_t hrs;
                 writeJob->usedBufferSize = decodedBytes;
-                WritePool_queueAndReacquireWriteJob(&writeJob);
+                IoPool_queueAndReacquireWriteJob(&writeJob);
                 filesize += decodedBytes;
                 hrs = UTIL_makeHumanReadableSize(filesize);
                 DISPLAYUPDATE(2, "\rDecompressed : %.*f%s  ", hrs.precision, hrs.value, hrs.suffix);
@@ -2749,7 +2769,7 @@ FIO_decompressLz4Frame(dRess_t* ress, FILE* srcFile,
     }
 
     LZ4F_freeDecompressionContext(dCtx);
-    WritePool_releaseWriteJob(writeJob);
+    IoPool_releaseWriteJob(writeJob);
     WritePool_sparseWriteEnd(ress->writePoolCtx);
 
     return decodingError ? FIO_ERROR_FRAME_DECODING : filesize;
@@ -2827,7 +2847,7 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
 #endif
         } else if ((prefs->overwrite) && !strcmp (dstFileName, stdoutmark)) {  /* pass-through mode */
             return FIO_passThrough(prefs,
-                                   ress.writePoolCtx->dstFile, srcFile,
+                                   ress.writePoolCtx->file, srcFile,
                                    ress.srcBuffer, ress.srcBufferSize,
                                    ress.srcBufferLoaded);
         } else {
@@ -2850,7 +2870,7 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
 
 /** FIO_decompressDstFile() :
     open `dstFileName`,
-    or pass-through if ress.writePoolCtx->dstFile is already != 0,
+    or pass-through if ress.writePoolCtx->file is already != 0,
     then start decompression process (FIO_decompressFrames()).
     @return : 0 : OK
               1 : operation aborted
@@ -2865,7 +2885,7 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
     int releaseDstFile = 0;
     int transferMTime = 0;
 
-    if ((ress.writePoolCtx->dstFile == NULL) && (prefs->testMode==0)) {
+    if ((ress.writePoolCtx->file == NULL) && (prefs->testMode == 0)) {
         FILE *dstFile;
         int dstFilePermissions = DEFAULT_FILE_PERMISSIONS;
         if ( strcmp(srcFileName, stdinmark)   /* special case : don't transfer permissions from stdin */
@@ -2880,7 +2900,7 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
 
         dstFile = FIO_openDstFile(fCtx, prefs, srcFileName, dstFileName, dstFilePermissions);
         if (dstFile==NULL) return 1;
-        WritePool_setDstFile(ress.writePoolCtx, dstFile);
+        IoPool_setFile(ress.writePoolCtx, dstFile);
 
         /* Must only be added after FIO_openDstFile() succeeds.
          * Otherwise we may delete the destination file if it already exists,
@@ -3109,7 +3129,7 @@ FIO_decompressMultipleFilenames(FIO_ctx_t* const fCtx,
         if (!prefs->testMode) {
             FILE* dstFile = FIO_openDstFile(fCtx, prefs, NULL, outFileName, DEFAULT_FILE_PERMISSIONS);
             if (dstFile == 0) EXM_THROW(19, "cannot open %s", outFileName);
-            WritePool_setDstFile(ress.writePoolCtx, dstFile);
+            IoPool_setFile(ress.writePoolCtx, dstFile);
         }
         for (; fCtx->currFileIdx < fCtx->nbFilesTotal; fCtx->currFileIdx++) {
             status = FIO_decompressSrcFile(fCtx, prefs, ress, outFileName, srcNamesTable[fCtx->currFileIdx]);
