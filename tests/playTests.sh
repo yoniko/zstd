@@ -185,7 +185,7 @@ fi
 
 println "\n===>  simple tests "
 
-datagen > tmp
+datagen -g500K > tmp
 zstd -h
 zstd -H
 zstd -V
