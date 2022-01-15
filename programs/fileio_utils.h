@@ -130,7 +130,6 @@ typedef struct {
 
     /* Controls the file we currently write to, make changes only by using provided utility functions */
     FILE* file;
-    unsigned storedSkips; // only used for write io pool
 
     /* The jobs and availableJobsCount fields are accessed by both the main and writer threads and should
      * only be mutated after locking the mutex */
@@ -157,6 +156,11 @@ typedef struct {
 } read_pool_ctx_t;
 
 typedef struct {
+    io_pool_ctx_t base;
+    unsigned storedSkips;
+} write_pool_ctx_t;
+
+typedef struct {
     /* These fields are automatically set and shouldn't be changed by non WritePool code. */
     void *ctx;
     FILE* file;
@@ -170,51 +174,49 @@ typedef struct {
 } io_job_t;
 
 
-/* IoPool_releaseIoJob:
+/* WritePool_releaseIoJob:
  * Releases an acquired job back to the pool. Doesn't execute the job. */
-void IoPool_releaseIoJob(io_job_t *job);
+void WritePool_releaseIoJob(io_job_t *job);
 
-/* IoPool_free:
- * Release a previously allocated write thread pool. Makes sure all takss are done and released. */
-void IoPool_free(io_pool_ctx_t* ctx);
-
-/* IoPool_acquireJob:
+/* WritePool_acquireJob:
  * Returns an available write job to be used for a future write. */
-io_job_t* IoPool_acquireJob(io_pool_ctx_t *ctx);
+io_job_t* WritePool_acquireJob(write_pool_ctx_t *ctx);
 
-/* IoPool_enqueueAndReacquireWriteJob:
+/* WritePool_enqueueAndReacquireWriteJob:
  * Queues a write job for execution and acquires a new one.
  * After execution `job`'s pointed value would change to the newly acquired job.
  * Make sure to set `usedBufferSize` to the wanted length before call.
  * The queued job shouldn't be used directly after queueing it. */
-void IoPool_enqueueAndReacquireWriteJob(io_job_t **job);
+void WritePool_enqueueAndReacquireWriteJob(io_job_t **job);
 
 /* WritePool_sparseWriteEnd:
  * Ends sparse writes to the current file.
  * Blocks on completion of all current write jobs before executing. */
-void WritePool_sparseWriteEnd(io_pool_ctx_t* ctx);
+void WritePool_sparseWriteEnd(write_pool_ctx_t *ctx);
 
-/* IoPool_setFile:
+/* WritePool_setFile:
  * Sets the destination file for future files in the pool.
  * Requires completion of all queues write jobs and release of all otherwise acquired jobs.
  * Also requires ending of sparse write if a previous file was used in sparse mode. */
-void IoPool_setFile(io_pool_ctx_t *ctx, FILE* file);
+void WritePool_setFile(write_pool_ctx_t *ctx, FILE* file);
 
 /* WritePool_closeDstFile:
  * Ends sparse write and closes the writePool's current file and sets the file to NULL.
  * Requires completion of all queues write jobs and release of all otherwise acquired jobs.  */
-int WritePool_closeDstFile(io_pool_ctx_t *ctx);
+int WritePool_closeDstFile(write_pool_ctx_t *ctx);
 
 /* WritePool_create:
  * Allocates and sets and a new write pool including its included jobs. */
-io_pool_ctx_t* WritePool_create(FIO_prefs_t* const prefs, size_t bufferSize);
+write_pool_ctx_t* WritePool_create(FIO_prefs_t* const prefs, size_t bufferSize);
+
+/* WritePool_free: */
+void WritePool_free(write_pool_ctx_t* ctx);
 
 /* ReadPool_create:
  * Allocates and sets and a new write pool including its included jobs. */
 read_pool_ctx_t* ReadPool_create(FIO_prefs_t* const prefs, size_t bufferSize);
 
-/* ReadPool_free:
- * Allocates and sets and a new write pool including its included jobs. */
+/* ReadPool_free: */
 void ReadPool_free(read_pool_ctx_t* ctx);
 
 void ReadPool_consumeBytes(read_pool_ctx_t *ctx, size_t n);
