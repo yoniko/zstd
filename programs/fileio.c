@@ -951,7 +951,7 @@ FIO_compressGzFrame(const cRess_t* ress,  /* buffers & handlers are used, but no
     while (1) {
         int ret;
         if (strm.avail_in == 0) {
-            ReadPool_readBuffer(ress->readCtx, ZSTD_CStreamInSize());
+            ReadPool_fillBuffer(ress->readCtx, ZSTD_CStreamInSize());
             if (ress->readCtx->srcBufferLoaded == 0) break;
             inFileSize += ress->readCtx->srcBufferLoaded;
             strm.next_in = (z_const unsigned char*)ress->readCtx->srcBuffer;
@@ -1047,7 +1047,7 @@ FIO_compressLzmaFrame(cRess_t* ress,
 
     while (1) {
         if (strm.avail_in == 0) {
-            size_t const inSize = ReadPool_readBuffer(ress->readCtx, ZSTD_CStreamInSize());
+            size_t const inSize = ReadPool_fillBuffer(ress->readCtx, ZSTD_CStreamInSize());
             if (ress->readCtx->srcBufferLoaded == 0) action = LZMA_FINISH;
             inFileSize += inSize;
             strm.next_in = (BYTE const*)ress->readCtx->srcBuffer;
@@ -1144,7 +1144,7 @@ FIO_compressLz4Frame(cRess_t* ress,
         outFileSize += headerSize;
 
         /* Read first block */
-        readSize  = ReadPool_readBuffer(ress->readCtx, blockSize);
+        readSize  = ReadPool_fillBuffer(ress->readCtx, blockSize);
         inFileSize += readSize;
 
         /* Main Loop */
@@ -1171,7 +1171,7 @@ FIO_compressLz4Frame(cRess_t* ress,
 
             /* Read next block */
             ReadPool_consumeBytes(ress->readCtx, ress->readCtx->srcBufferLoaded);
-            readSize  = ReadPool_readBuffer(ress->readCtx, blockSize);
+            readSize  = ReadPool_fillBuffer(ress->readCtx, blockSize);
             inFileSize += readSize;
         }
 
@@ -1250,7 +1250,7 @@ FIO_compressZstdFrame(FIO_ctx_t* const fCtx,
     do {
         size_t stillToFlush;
         /* Fill input Buffer */
-        size_t const inSize = ReadPool_readBuffer(ress.readCtx, ZSTD_CStreamInSize());
+        size_t const inSize = ReadPool_fillBuffer(ress.readCtx, ZSTD_CStreamInSize());
         ZSTD_inBuffer inBuff = { ress.readCtx->srcBuffer, ress.readCtx->srcBufferLoaded, 0 };
         DISPLAYLEVEL(6, "fread %u bytes from source \n", (unsigned)inSize);
         *readsize += inSize;
@@ -1538,8 +1538,8 @@ static int FIO_compressFilename_dstFile(FIO_ctx_t* const fCtx,
     stat_t statbuf;
     int transferMTime = 0;
     FILE *dstFile;
-    assert(ress.readCtx->base.file != NULL);
-    if (ress.writeCtx->base.file == NULL) {
+    assert(ReadPool_getFile(ress.readCtx) != NULL);
+    if (WritePool_getFile(ress.writeCtx) == NULL) {
         int dstFilePermissions = DEFAULT_FILE_PERMISSIONS;
         if ( strcmp (srcFileName, stdinmark)
           && strcmp (dstFileName, stdoutmark)
@@ -1567,7 +1567,7 @@ static int FIO_compressFilename_dstFile(FIO_ctx_t* const fCtx,
         clearHandler();
 
         DISPLAYLEVEL(6, "FIO_compressFilename_dstFile: closing dst: %s \n", dstFileName);
-        if (WritePool_closeDstFile(ress.writeCtx)) { /* error closing file */
+        if (WritePool_closeFile(ress.writeCtx)) { /* error closing file */
             DISPLAYLEVEL(1, "zstd: %s: %s \n", dstFileName, strerror(errno));
             result=1;
         }
@@ -1639,14 +1639,11 @@ FIO_compressFilename_srcFile(FIO_ctx_t* const fCtx,
 
     srcFile = FIO_openSrcFile(prefs, srcFileName);
     if (srcFile == NULL) return 1;   /* srcFile could not be opened */
+
     ReadPool_setFile(ress.readCtx, srcFile);
-    ReadPool_startReading(ress.readCtx);
-
     result = FIO_compressFilename_dstFile(fCtx, prefs, ress, dstFileName, srcFileName, compressionLevel);
+    ReadPool_closeFile(ress.readCtx);
 
-    fclose(srcFile);
-    // TODO: implement proper & safe close
-    ReadPool_setFile(ress.readCtx, NULL);
     if ( prefs->removeSrcFile   /* --rm */
       && result == 0       /* success */
       && strcmp(srcFileName, stdinmark)   /* exception : don't erase stdin */
@@ -1808,7 +1805,7 @@ int FIO_compressMultipleFilenames(FIO_ctx_t* const fCtx,
                 if (!status) fCtx->nbFilesProcessed++;
                 error |= status;
             }
-            if (WritePool_closeDstFile(ress.writeCtx))
+            if (WritePool_closeFile(ress.writeCtx))
                 EXM_THROW(29, "Write error (%s) : cannot properly close %s",
                             strerror(errno), outFileName);
         }
@@ -1913,11 +1910,11 @@ static int FIO_passThrough(dRess_t *ress)
 {
     size_t const blockSize = MIN(MIN(64 KB, ZSTD_DStreamInSize()), ZSTD_DStreamOutSize());
     io_job_t *writeJob = WritePool_acquireJob(ress->writeCtx);
-    ReadPool_readBuffer(ress->readCtx, blockSize);
+    ReadPool_fillBuffer(ress->readCtx, blockSize);
 
     while(ress->readCtx->srcBufferLoaded) {
         size_t writeSize;
-        ReadPool_readBuffer(ress->readCtx, blockSize);
+        ReadPool_fillBuffer(ress->readCtx, blockSize);
         writeSize = MIN(blockSize, ress->readCtx->srcBufferLoaded);
         assert(writeSize <= writeJob->bufferSize);
         memcpy(writeJob->buffer, ress->readCtx->srcBuffer, writeSize);
@@ -1985,7 +1982,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress,
 
     /* Header loading : ensures ZSTD_getFrameHeader() will succeed */
     if (ress->readCtx->srcBufferLoaded < ZSTD_FRAMEHEADERSIZE_MAX)
-        ReadPool_readBuffer(ress->readCtx, ZSTD_FRAMEHEADERSIZE_MAX);
+        ReadPool_fillBuffer(ress->readCtx, ZSTD_FRAMEHEADERSIZE_MAX);
 
     /* Main decompression Loop */
     while (1) {
@@ -2028,7 +2025,7 @@ FIO_decompressZstdFrame(FIO_ctx_t* const fCtx, dRess_t* ress,
         /* Fill input buffer */
         {   size_t const toDecode = MIN(readSizeHint, ZSTD_DStreamInSize());  /* support large skippable frames */
             if (ress->readCtx->srcBufferLoaded < toDecode) {
-                size_t const readSize = ReadPool_readBuffer(ress->readCtx, toDecode);
+                size_t const readSize = ReadPool_fillBuffer(ress->readCtx, toDecode);
                 if (readSize==0) {
                     DISPLAYLEVEL(1, "%s : Read error (39) : premature end \n",
                                     srcFileName);
@@ -2072,7 +2069,7 @@ FIO_decompressGzFrame(dRess_t* ress, const char* srcFileName)
     for ( ; ; ) {
         int ret;
         if (strm.avail_in == 0) {
-            ReadPool_consumeAndReadAll(ress->readCtx);
+            ReadPool_consumeAndRefill(ress->readCtx);
             if (ress->readCtx->srcBufferLoaded == 0) flush = Z_FINISH;
             strm.next_in = (z_const unsigned char*)ress->readCtx->srcBuffer;
             strm.avail_in = (uInt)ress->readCtx->srcBufferLoaded;
@@ -2147,7 +2144,7 @@ FIO_decompressLzmaFrame(dRess_t* ress,
     for ( ; ; ) {
         lzma_ret ret;
         if (strm.avail_in == 0) {
-            ReadPool_consumeAndReadAll(ress->readCtx);
+            ReadPool_consumeAndRefill(ress->readCtx);
             if (ress->readCtx->srcBufferLoaded == 0) action = LZMA_FINISH;
             strm.next_in = (BYTE const*)ress->readCtx->srcBuffer;
             strm.avail_in = ress->readCtx->srcBufferLoaded;
@@ -2207,7 +2204,7 @@ FIO_decompressLz4Frame(dRess_t* ress, const char* srcFileName)
         int fullBufferDecoded = 0;
 
         /* Read input */
-        ReadPool_readBuffer(ress->readCtx, nextToLoad);
+        ReadPool_fillBuffer(ress->readCtx, nextToLoad);
         if(!ress->readCtx->srcBufferLoaded) break; /* reached end of file */
 
         while ((pos < ress->readCtx->srcBufferLoaded) || fullBufferDecoded) {  /* still to read, or still to flush */
@@ -2272,7 +2269,7 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
         /* check magic number -> version */
         size_t const toRead = 4;
         const BYTE* buf;
-        ReadPool_readBuffer(ress.readCtx, toRead);
+        ReadPool_fillBuffer(ress.readCtx, toRead);
         buf = (const BYTE*)ress.readCtx->srcBuffer;
         if (ress.readCtx->srcBufferLoaded==0) {
             if (readSomething==0) {  /* srcFile is empty (which is invalid) */
@@ -2339,8 +2336,7 @@ static int FIO_decompressFrames(FIO_ctx_t* const fCtx,
 }
 
 /** FIO_decompressDstFile() :
-    open `dstFileName`,
-    or pass-through if ress.writeCtx->file is already != 0,
+    open `dstFileName`, or pass-through if writeCtx's file is already != 0,
     then start decompression process (FIO_decompressFrames()).
     @return : 0 : OK
               1 : operation aborted
@@ -2355,7 +2351,7 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
     int releaseDstFile = 0;
     int transferMTime = 0;
 
-    if ((ress.writeCtx->base.file == NULL) && (prefs->testMode == 0)) {
+    if ((WritePool_getFile(ress.writeCtx) == NULL) && (prefs->testMode == 0)) {
         FILE *dstFile;
         int dstFilePermissions = DEFAULT_FILE_PERMISSIONS;
         if ( strcmp(srcFileName, stdinmark)   /* special case : don't transfer permissions from stdin */
@@ -2383,7 +2379,7 @@ static int FIO_decompressDstFile(FIO_ctx_t* const fCtx,
 
     if (releaseDstFile) {
         clearHandler();
-        if (WritePool_closeDstFile(ress.writeCtx)) {
+        if (WritePool_closeFile(ress.writeCtx)) {
             DISPLAYLEVEL(1, "zstd: %s: %s \n", dstFileName, strerror(errno));
             result = 1;
         }
@@ -2421,7 +2417,6 @@ static int FIO_decompressSrcFile(FIO_ctx_t* const fCtx, FIO_prefs_t* const prefs
     srcFile = FIO_openSrcFile(prefs, srcFileName);
     if (srcFile==NULL) return 1;
     ReadPool_setFile(ress.readCtx, srcFile);
-    ReadPool_startReading(ress.readCtx);
 
     result = FIO_decompressDstFile(fCtx, prefs, ress, dstFileName, srcFileName);
 
@@ -2609,7 +2604,7 @@ FIO_decompressMultipleFilenames(FIO_ctx_t* const fCtx,
             if (!status) fCtx->nbFilesProcessed++;
             error |= status;
         }
-        if ((!prefs->testMode) && (WritePool_closeDstFile(ress.writeCtx)))
+        if ((!prefs->testMode) && (WritePool_closeFile(ress.writeCtx)))
             EXM_THROW(72, "Write error : %s : cannot properly close output file",
                         strerror(errno));
     } else {

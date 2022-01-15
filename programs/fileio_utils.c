@@ -115,12 +115,11 @@ FIO_fwriteSparseEnd(const FIO_prefs_t* const prefs, FILE* file, unsigned storedS
  *  AsyncIO functionality
  ************************************************************************/
 
-
 /* ***********************************
  *  General IoPool implementation
  *************************************/
 
-static io_job_t *FIO_createIoJob(io_pool_ctx_t *ctx, size_t bufferSize) {
+static io_job_t *IoPool_createIoJob(io_pool_ctx_t *ctx, size_t bufferSize) {
     void *buffer;
     io_job_t *job;
     job = (io_job_t*) malloc(sizeof(io_job_t));
@@ -137,10 +136,10 @@ static io_job_t *FIO_createIoJob(io_pool_ctx_t *ctx, size_t bufferSize) {
 }
 
 
-/* IO_createThreadPool:
+/* IoPool_createThreadPool:
  * Creates a thread pool and a mutex for threaded IO pool.
  * Displays warning if asyncio is requested but MT isn't available. */
-static void IO_createThreadPool(io_pool_ctx_t *ctx, const FIO_prefs_t *prefs) {
+static void IoPool_createThreadPool(io_pool_ctx_t *ctx, const FIO_prefs_t *prefs) {
     ctx->threadPool = NULL;
     if(prefs->asyncIO) {
         if (ZSTD_pthread_mutex_init(&ctx->ioJobsMutex, NULL))
@@ -158,13 +157,13 @@ static void IO_createThreadPool(io_pool_ctx_t *ctx, const FIO_prefs_t *prefs) {
  * Allocates and sets and a new write pool including its included availableJobs. */
 static void IoPool_init(io_pool_ctx_t *ctx, FIO_prefs_t* const prefs, POOL_function poolFunction, size_t bufferSize) {
     int i;
-    IO_createThreadPool(ctx, prefs);
+    IoPool_createThreadPool(ctx, prefs);
     ctx->prefs = prefs;
     ctx->poolFunction = poolFunction;
     ctx->totalIoJobs = ctx->threadPool ? MAX_IO_JOBS : 1;
     ctx->availableJobsCount = ctx->totalIoJobs;
     for(i=0; i < ctx->availableJobsCount; i++) {
-        ctx->availableJobs[i] = FIO_createIoJob(ctx, bufferSize);
+        ctx->availableJobs[i] = IoPool_createIoJob(ctx, bufferSize);
     }
     ctx->file = NULL;
 }
@@ -185,13 +184,20 @@ static void IoPool_releaseIoJob(io_job_t *job) {
     }
 }
 
+/* IoPool_join:
+ * Waits for all tasks in the pool to finish executing. */
+static void IoPool_join(io_pool_ctx_t* ctx) {
+    if(ctx->threadPool)
+        POOL_joinJobs(ctx->threadPool);
+}
+
 /* IoPool_free:
  * Release a previously allocated write thread pool. Makes sure all takss are done and released. */
 static void IoPool_destroy(io_pool_ctx_t* ctx) {
-    int i=0;
+    int i;
     if(ctx->threadPool) {
         /* Make sure we finish all tasks and then free the resources */
-        POOL_joinJobs(ctx->threadPool);
+        IoPool_join(ctx);
         /* Make sure we are not leaking availableJobs */
         assert(ctx->availableJobsCount == ctx->totalIoJobs);
         POOL_free(ctx->threadPool);
@@ -206,7 +212,7 @@ static void IoPool_destroy(io_pool_ctx_t* ctx) {
 }
 
 /* IoPool_acquireJob:
- * Returns an available write job to be used for a future write. */
+ * Returns an available io job to be used for a future io. */
 static io_job_t* IoPool_acquireJob(io_pool_ctx_t *ctx) {
     io_job_t *job;
     assert(ctx->file != NULL || ctx->prefs->testMode);
@@ -233,16 +239,17 @@ static io_job_t* IoPool_acquireJob(io_pool_ctx_t *ctx) {
  * Also requires ending of sparse write if a previous file was used in sparse mode. */
 static void IoPool_setFile(io_pool_ctx_t *ctx, FILE* file) {
     assert(ctx!=NULL);
-    /* We can change the dst file only if we have finished writing */
-    if(ctx->threadPool)
-        POOL_joinJobs(ctx->threadPool);
+    IoPool_join(ctx);
     assert(ctx->availableJobsCount == ctx->totalIoJobs);
     ctx->file = file;
 }
 
+static FILE* IoPool_getFile(io_pool_ctx_t *ctx) {
+    return ctx->file;
+}
+
 /* IoPool_enqueueJob:
- * Queues a write job for execution.
- * Make sure to set `usedBufferSize` to the wanted length before call.
+ * Enqueues an io job for execution.
  * The queued job shouldn't be used directly after queueing it. */
 static void IoPool_enqueueJob(io_job_t *job) {
     io_pool_ctx_t* ctx = (io_pool_ctx_t *)job->ctx;
@@ -256,6 +263,8 @@ static void IoPool_enqueueJob(io_job_t *job) {
  *  WritePool implementation
  *************************************/
 
+/* WritePool_acquireJob:
+ * Returns an available write job to be used for a future write. */
 io_job_t* WritePool_acquireJob(write_pool_ctx_t *ctx) {
     return IoPool_acquireJob(&ctx->base);
 }
@@ -281,20 +290,25 @@ void WritePool_sparseWriteEnd(write_pool_ctx_t *ctx) {
     ctx->storedSkips = 0;
 }
 
-/* ReadPool_setFile */
+/* WritePool_setFile:
+ * Sets the destination file for future writes in the pool.
+ * Requires completion of all queues write jobs and release of all otherwise acquired jobs.
+ * Also requires ending of sparse write if a previous file was used in sparse mode. */
 void WritePool_setFile(write_pool_ctx_t *ctx, FILE* file) {
     IoPool_setFile(&ctx->base, file);
     assert(ctx->storedSkips == 0);
 }
 
+/* WritePool_releaseIoJob:
+ * Releases an acquired job back to the pool. Doesn't execute the job. */
 void WritePool_releaseIoJob(io_job_t *job) {
     IoPool_releaseIoJob(job);
 }
 
-/* WritePool_closeDstFile:
+/* WritePool_closeFile:
  * Ends sparse write and closes the writePool's current file and sets the file to NULL.
  * Requires completion of all queues write jobs and release of all otherwise acquired jobs.  */
-int WritePool_closeDstFile(write_pool_ctx_t *ctx) {
+int WritePool_closeFile(write_pool_ctx_t *ctx) {
     FILE *dstFile = ctx->base.file;
     assert(dstFile!=NULL || ctx->base.prefs->testMode!=0);
     WritePool_sparseWriteEnd(ctx);
@@ -321,9 +335,12 @@ write_pool_ctx_t* WritePool_create(FIO_prefs_t* const prefs, size_t bufferSize) 
     return ctx;
 }
 
-/* WritePool_free: */
+/* WritePool_free:
+ * Frees and releases a writePool and its resources. Closes destination file if needs to. */
 void WritePool_free(write_pool_ctx_t* ctx) {
     /* Make sure we finish all tasks and then free the resources */
+    if(WritePool_getFile(ctx))
+        WritePool_closeFile(ctx);
     IoPool_destroy(&ctx->base);
     assert(ctx->storedSkips==0);
 }
@@ -339,17 +356,6 @@ static void ReadPool_releaseAllCompletedJobs(read_pool_ctx_t* ctx) {
         IoPool_releaseIoJob(job);
     }
     ctx->completedJobsCount = 0;
-}
-
-/* ReadPool_setFile */
-void ReadPool_setFile(read_pool_ctx_t *ctx, FILE* file) {
-    assert(ctx!=NULL);
-    ReadPool_releaseAllCompletedJobs(ctx);
-    IoPool_setFile(&ctx->base, file);
-    ctx->nextReadOffset = 0;
-    ctx->waitingOnOffset = 0;
-    ctx->srcBuffer = ctx->srcBufferBase;
-    ctx->reachedEof = 0;
 }
 
 /* ReadPool_addJobToCompleted */
@@ -426,8 +432,44 @@ static void ReadPool_executeReadJob(void* opaque){
     ReadPool_addJobToCompleted(job);
 }
 
+static void ReadPool_enqueueRead(read_pool_ctx_t *ctx) {
+    io_job_t *job = IoPool_acquireJob(&ctx->base);
+    job->offset = ctx->nextReadOffset;
+    ctx->nextReadOffset += job->bufferSize;
+    IoPool_enqueueJob(job);
+}
+
+static void ReadPool_startReading(read_pool_ctx_t *ctx) {
+    int i;
+    for (i = 0; i < ctx->base.availableJobsCount; i++) {
+        ReadPool_enqueueRead(ctx);
+    }
+}
+
+/* ReadPool_setFile:
+ * Sets the source file for future read in the pool. Initiates reading immediately if file is not NULL.
+ * Waits for all current enqueued tasks to complete if a previous file was set. */
+void ReadPool_setFile(read_pool_ctx_t *ctx, FILE* file) {
+    assert(ctx!=NULL);
+    IoPool_join(&ctx->base);
+    ReadPool_releaseAllCompletedJobs(ctx);
+    IoPool_setFile(&ctx->base, file);
+    ctx->nextReadOffset = 0;
+    ctx->waitingOnOffset = 0;
+    ctx->srcBuffer = ctx->srcBufferBase;
+    ctx->reachedEof = 0;
+    if(file != NULL)
+        ReadPool_startReading(ctx);
+}
+
+FILE* WritePool_getFile(write_pool_ctx_t *ctx) {
+    return IoPool_getFile(&ctx->base);
+}
+
 /* ReadPool_create:
- * Allocates and sets and a new write pool including its included jobs. */
+ * Allocates and sets and a new readPool including its included jobs.
+ * bufferSize should be set to the maximal buffer we want to read at a time, will also be used
+ * as our basic read size. */
 read_pool_ctx_t* ReadPool_create(FIO_prefs_t* const prefs, size_t bufferSize) {
     read_pool_ctx_t* ctx = (read_pool_ctx_t*) malloc(sizeof(read_pool_ctx_t));
     if(!ctx) EXM_THROW(100, "Allocation error : not enough memory");
@@ -446,8 +488,11 @@ read_pool_ctx_t* ReadPool_create(FIO_prefs_t* const prefs, size_t bufferSize) {
     return ctx;
 }
 
+/* ReadPool_free:
+ * Frees and releases a readPool and its resources. Closes source file. */
 void ReadPool_free(read_pool_ctx_t* ctx) {
-    ReadPool_releaseAllCompletedJobs(ctx);
+    if(ReadPool_getFile(ctx))
+        ReadPool_closeFile(ctx);
     if(ctx->base.threadPool)
         ZSTD_pthread_cond_destroy(&ctx->jobCompletedCond);
     IoPool_destroy(&ctx->base);
@@ -455,6 +500,8 @@ void ReadPool_free(read_pool_ctx_t* ctx) {
     free(ctx);
 }
 
+/* ReadPool_consumeBytes:
+ * Consumes byes from srcBuffer's beginning and updates srcBufferLoaded accordingly. */
 void ReadPool_consumeBytes(read_pool_ctx_t *ctx, size_t n) {
     assert(n <= ctx->srcBufferLoaded);
     assert(ctx->srcBuffer + n <= ctx->srcBufferBase + ctx->srcBufferBaseSize);
@@ -462,18 +509,17 @@ void ReadPool_consumeBytes(read_pool_ctx_t *ctx, size_t n) {
     ctx->srcBuffer += n;
 }
 
-static void ReadPool_enqueueRead(read_pool_ctx_t *ctx) {
-    io_job_t *job = IoPool_acquireJob(&ctx->base);
-    job->offset = ctx->nextReadOffset;
-    ctx->nextReadOffset += job->bufferSize;
-    IoPool_enqueueJob(job);
-}
-
-size_t ReadPool_readBuffer(read_pool_ctx_t *ctx, size_t n) {
+/* ReadPool_fillBuffer:
+ * Makes sure buffer has at least n bytes loaded (as long as n is not bigger than the initalized bufferSize).
+ * Returns if srcBuffer has at least n bytes loaded or if we've reached the end of the file.
+ * Return value is the number of bytes added to the buffer.
+ * Note that srcBuffer might have up to 2 times bufferSize bytes. */
+size_t ReadPool_fillBuffer(read_pool_ctx_t *ctx, size_t n) {
     io_job_t *job;
     size_t srcBufferOffsetFromBase;
     size_t srcBufferRemainingSpace;
     size_t bytesRead = 0;
+    assert(n <= ctx->srcBufferBaseSize/2);
     while (ctx->srcBufferLoaded < n) {
         job = ReadPool_getNextCompletedJob(ctx);
        if(job == NULL)
@@ -497,14 +543,23 @@ size_t ReadPool_readBuffer(read_pool_ctx_t *ctx, size_t n) {
     return bytesRead;
 }
 
-size_t ReadPool_consumeAndReadAll(read_pool_ctx_t *ctx) {
+/* ReadPool_consumeAndRefill:
+ * Consumes the current buffer and refills it with bufferSize bytes. */
+size_t ReadPool_consumeAndRefill(read_pool_ctx_t *ctx) {
     ReadPool_consumeBytes(ctx, ctx->srcBufferLoaded);
-    return ReadPool_readBuffer(ctx, ZSTD_DStreamInSize());
+    return ReadPool_fillBuffer(ctx, ctx->srcBufferBaseSize/2);
 }
 
-void ReadPool_startReading(read_pool_ctx_t *ctx) {
-    int i;
-    for (i = 0; i < ctx->base.availableJobsCount; i++) {
-        ReadPool_enqueueRead(ctx);
-    }
+/* ReadPool_getFile:
+ * Returns the current file set for the read pool. */
+FILE* ReadPool_getFile(read_pool_ctx_t *ctx) {
+    return IoPool_getFile(&ctx->base);
+}
+
+/* ReadPool_closeFile:
+ * Closes the current set file. Waits for all current enqueued tasks to complete and resets state. */
+int ReadPool_closeFile(read_pool_ctx_t *ctx) {
+    FILE* file = ReadPool_getFile(ctx);
+    ReadPool_setFile(ctx, NULL);
+    return fclose(file);
 }
