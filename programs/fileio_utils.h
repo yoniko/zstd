@@ -131,29 +131,34 @@ typedef struct {
     /* Controls the file we currently write to, make changes only by using provided utility functions */
     FILE* file;
     unsigned storedSkips; // only used for write io pool
-    int reachedEof;
-    U64 nextReadOffset;
-    U64 waitingOnOffset;
 
     /* The jobs and availableJobsCount fields are accessed by both the main and writer threads and should
      * only be mutated after locking the mutex */
     ZSTD_pthread_mutex_t ioJobsMutex;
     void* availableJobs[MAX_IO_JOBS];
     int availableJobsCount;
+} io_pool_ctx_t;
 
-    void* completedJobs[MAX_IO_JOBS];
-    int completedJobsCount;
-    ZSTD_pthread_cond_t jobCompletedCond;
+typedef struct {
+    io_pool_ctx_t base;
+
+    int reachedEof;
+    U64 nextReadOffset;
+    U64 waitingOnOffset;
 
     U8 *srcBufferBase;
     size_t srcBufferBaseSize;
     U8 *srcBuffer;
     size_t srcBufferLoaded;
-} io_pool_ctx_t;
+
+    void* completedJobs[MAX_IO_JOBS];
+    int completedJobsCount;
+    ZSTD_pthread_cond_t jobCompletedCond;
+} read_pool_ctx_t;
 
 typedef struct {
     /* These fields are automatically set and shouldn't be changed by non WritePool code. */
-    io_pool_ctx_t *ctx;
+    void *ctx;
     FILE* file;
     void *buffer;
     size_t bufferSize;
@@ -168,7 +173,6 @@ typedef struct {
 /* IoPool_releaseIoJob:
  * Releases an acquired job back to the pool. Doesn't execute the job. */
 void IoPool_releaseIoJob(io_job_t *job);
-
 
 /* IoPool_free:
  * Release a previously allocated write thread pool. Makes sure all takss are done and released. */
@@ -207,13 +211,20 @@ io_pool_ctx_t* WritePool_create(FIO_prefs_t* const prefs, size_t bufferSize);
 
 /* ReadPool_create:
  * Allocates and sets and a new write pool including its included jobs. */
-io_pool_ctx_t* ReadPool_create(FIO_prefs_t* const prefs, size_t bufferSize);
+read_pool_ctx_t* ReadPool_create(FIO_prefs_t* const prefs, size_t bufferSize);
 
-void ReadPool_consumeBytes(io_pool_ctx_t *ctx, size_t n);
+/* ReadPool_free:
+ * Allocates and sets and a new write pool including its included jobs. */
+void ReadPool_free(read_pool_ctx_t* ctx);
 
-size_t ReadPool_readBuffer(io_pool_ctx_t *ctx, size_t n);
+void ReadPool_consumeBytes(read_pool_ctx_t *ctx, size_t n);
 
-size_t ReadPool_consumeAndReadAll(io_pool_ctx_t *ctx);
+size_t ReadPool_readBuffer(read_pool_ctx_t *ctx, size_t n);
 
-void ReadPool_startReading(io_pool_ctx_t *ctx);
+size_t ReadPool_consumeAndReadAll(read_pool_ctx_t *ctx);
+
+void ReadPool_setFile(read_pool_ctx_t *ctx, FILE* file);
+
+void ReadPool_startReading(read_pool_ctx_t *ctx);
+
 #endif /* FILEIO_UTILS_HEADER */

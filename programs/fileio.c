@@ -789,7 +789,7 @@ typedef struct {
     const char* dictFileName;
     ZSTD_CStream* cctx;
     io_pool_ctx_t *writeCtx;
-    io_pool_ctx_t *readCtx;
+    read_pool_ctx_t *readCtx;
 } cRess_t;
 
 /** ZSTD_cycleLog() :
@@ -913,7 +913,7 @@ static void FIO_freeCResources(const cRess_t* const ress)
 {
     free(ress->dictBuffer);
     IoPool_free(ress->writeCtx);
-    IoPool_free(ress->readCtx);
+    ReadPool_free(ress->readCtx);
     ZSTD_freeCStream(ress->cctx);   /* never fails */
 }
 
@@ -1538,7 +1538,7 @@ static int FIO_compressFilename_dstFile(FIO_ctx_t* const fCtx,
     stat_t statbuf;
     int transferMTime = 0;
     FILE *dstFile;
-    assert(ress.readCtx->file != NULL);
+    assert(ress.readCtx->base.file != NULL);
     if (ress.writeCtx->file == NULL) {
         int dstFilePermissions = DEFAULT_FILE_PERMISSIONS;
         if ( strcmp (srcFileName, stdinmark)
@@ -1639,14 +1639,14 @@ FIO_compressFilename_srcFile(FIO_ctx_t* const fCtx,
 
     srcFile = FIO_openSrcFile(prefs, srcFileName);
     if (srcFile == NULL) return 1;   /* srcFile could not be opened */
-    IoPool_setFile(ress.readCtx, srcFile);
+    ReadPool_setFile(ress.readCtx, srcFile);
     ReadPool_startReading(ress.readCtx);
 
     result = FIO_compressFilename_dstFile(fCtx, prefs, ress, dstFileName, srcFileName, compressionLevel);
 
     fclose(srcFile);
     // TODO: implement proper & safe close
-    IoPool_setFile(ress.readCtx, NULL);
+    ReadPool_setFile(ress.readCtx, NULL);
     if ( prefs->removeSrcFile   /* --rm */
       && result == 0       /* success */
       && strcmp(srcFileName, stdinmark)   /* exception : don't erase stdin */
@@ -1869,7 +1869,7 @@ int FIO_compressMultipleFilenames(FIO_ctx_t* const fCtx,
 typedef struct {
     ZSTD_DStream* dctx;
     io_pool_ctx_t *writeCtx;
-    io_pool_ctx_t *readCtx;
+    read_pool_ctx_t *readCtx;
 } dRess_t;
 
 static dRess_t FIO_createDResources(FIO_prefs_t* const prefs, const char* dictFileName)
@@ -1904,7 +1904,7 @@ static void FIO_freeDResources(dRess_t ress)
 {
     CHECK( ZSTD_freeDStream(ress.dctx) );
     IoPool_free(ress.writeCtx);
-    IoPool_free(ress.readCtx);
+    ReadPool_free(ress.readCtx);
 }
 
 /** FIO_passThrough() : just copy input into output, for compatibility with gzip -df mode
@@ -2420,12 +2420,12 @@ static int FIO_decompressSrcFile(FIO_ctx_t* const fCtx, FIO_prefs_t* const prefs
 
     srcFile = FIO_openSrcFile(prefs, srcFileName);
     if (srcFile==NULL) return 1;
-    IoPool_setFile(ress.readCtx, srcFile);
+    ReadPool_setFile(ress.readCtx, srcFile);
     ReadPool_startReading(ress.readCtx);
 
     result = FIO_decompressDstFile(fCtx, prefs, ress, dstFileName, srcFileName);
 
-    IoPool_setFile(ress.readCtx, NULL);
+    ReadPool_setFile(ress.readCtx, NULL);
 
     /* Close file */
     if (fclose(srcFile)) {
