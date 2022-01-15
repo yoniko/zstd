@@ -2,6 +2,7 @@
 #include <stdlib.h>     /* malloc, free */
 #include <assert.h>
 #include <errno.h>      /* errno */
+#include <string.h>     /* strerror */
 
 #include "fileio_utils.h"
 
@@ -343,6 +344,7 @@ void WritePool_free(write_pool_ctx_t* ctx) {
         WritePool_closeFile(ctx);
     IoPool_destroy(&ctx->base);
     assert(ctx->storedSkips==0);
+    free(ctx);
 }
 
 

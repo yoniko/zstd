@@ -848,7 +848,7 @@ static cRess_t FIO_createCResources(FIO_prefs_t* const prefs,
     ress.dictBufferSize = FIO_createDictBuffer(&ress.dictBuffer, dictFileName, prefs);   /* works with dictFileName==NULL */
 
     ress.writeCtx = WritePool_create(prefs, ZSTD_CStreamOutSize());
-    ress.readCtx = ReadPool_create(prefs, ZSTD_DStreamInSize());
+    ress.readCtx = ReadPool_create(prefs, ZSTD_CStreamInSize());
 
     /* Advanced parameters, including dictionary */
     if (dictFileName && (ress.dictBuffer==NULL))
