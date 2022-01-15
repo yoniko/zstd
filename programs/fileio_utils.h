@@ -1,5 +1,9 @@
-#ifndef FILEIO_UTILS_HEADER
-#define FILEIO_UTILS_HEADER
+#ifndef FILEIO_UTILS_H_MODULE
+#define FILEIO_UTILS_H_MODULE
+
+#if defined (__cplusplus)
+extern "C" {
+#endif
 
 #include "../lib/common/mem.h"     /* U32, U64 */
 #include "timefn.h"
@@ -263,4 +267,8 @@ FILE* ReadPool_getFile(read_pool_ctx_t *ctx);
  * Closes the current set file. Waits for all current enqueued tasks to complete and resets state. */
 int ReadPool_closeFile(read_pool_ctx_t *ctx);
 
-#endif /* FILEIO_UTILS_HEADER */
+#if defined (__cplusplus)
+}
+#endif
+
+#endif /* FILEIO_UTILS_H_MODULE */

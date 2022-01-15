@@ -1,8 +1,14 @@
+#include "platform.h"
 #include <stdio.h>      /* fprintf, open, fdopen, fread, _fileno, stdin, stdout */
 #include <stdlib.h>     /* malloc, free */
 #include <assert.h>
 #include <errno.h>      /* errno */
-#include <string.h>     /* strerror */
+#include "timefn.h"     /* UTIL_getTime, UTIL_clockSpanMicro */
+
+#if defined (_MSC_VER)
+#  include <sys/stat.h>
+#  include <io.h>
+#endif
 
 #include "fileio_utils.h"
 
