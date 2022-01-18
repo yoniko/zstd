@@ -366,7 +366,6 @@ static void ReadPool_releaseAllCompletedJobs(read_pool_ctx_t* ctx) {
     ctx->completedJobsCount = 0;
 }
 
-/* ReadPool_addJobToCompleted */
 static void ReadPool_addJobToCompleted(io_job_t *job) {
     read_pool_ctx_t *ctx = (read_pool_ctx_t *)job->ctx;
     if(ctx->base.threadPool)
@@ -379,8 +378,11 @@ static void ReadPool_addJobToCompleted(io_job_t *job) {
     }
 }
 
-/* assuming ioJobsMutex is locked */
-static io_job_t* ReadPool_findWaitingJob(read_pool_ctx_t *ctx) {
+/* ReadPool_findNextWaitingOffsetCompletedJob:
+ * Looks through the completed jobs for a job matching the waitingOnOffset and returns it,
+ * if job wasn't found returns NULL.
+ * IMPORTANT: assumes ioJobsMutex is locked. */
+static io_job_t* ReadPool_findNextWaitingOffsetCompletedJob(read_pool_ctx_t *ctx) {
     io_job_t *job = NULL;
     int i;
     for (i=0; i<ctx->completedJobsCount; i++) {
@@ -393,18 +395,21 @@ static io_job_t* ReadPool_findWaitingJob(read_pool_ctx_t *ctx) {
     return NULL;
 }
 
-/* ReadPool_getNextCompletedJob */
+/* ReadPool_getNextCompletedJob:
+ * Returns a completed io_job_t for the next read in line based on waitingOnOffset and advances waitingOnOffset.
+ * Would block. */
 static io_job_t* ReadPool_getNextCompletedJob(read_pool_ctx_t *ctx) {
     io_job_t *job = NULL;
     if(ctx->base.threadPool)
         ZSTD_pthread_mutex_lock(&ctx->base.ioJobsMutex);
 
-    job = ReadPool_findWaitingJob(ctx);
+    job = ReadPool_findNextWaitingOffsetCompletedJob(ctx);
 
+    /* As long as we didn't find the job matching the next read, and we have some reads in flight continue waiting */
     while (!job && (ctx->base.availableJobsCount + ctx->completedJobsCount < ctx->base.totalIoJobs)) {
-        assert(ctx->base.threadPool != NULL);
+        assert(ctx->base.threadPool != NULL); /* we shouldn't be here if we work in sync mode */
         ZSTD_pthread_cond_wait(&ctx->jobCompletedCond, &ctx->base.ioJobsMutex);
-        job = ReadPool_findWaitingJob(ctx);
+        job = ReadPool_findNextWaitingOffsetCompletedJob(ctx);
     }
 
     if(job) {
