@@ -306,6 +306,12 @@ void WritePool_setFile(write_pool_ctx_t *ctx, FILE* file) {
     assert(ctx->storedSkips == 0);
 }
 
+/* WritePool_getFile:
+ * Returns the file the writePool is currently set to write to. */
+FILE* WritePool_getFile(write_pool_ctx_t *ctx) {
+    return IoPool_getFile(&ctx->base);
+}
+
 /* WritePool_releaseIoJob:
  * Releases an acquired job back to the pool. Doesn't execute the job. */
 void WritePool_releaseIoJob(io_job_t *job) {
@@ -473,10 +479,6 @@ void ReadPool_setFile(read_pool_ctx_t *ctx, FILE* file) {
     ctx->reachedEof = 0;
     if(file != NULL)
         ReadPool_startReading(ctx);
-}
-
-FILE* WritePool_getFile(write_pool_ctx_t *ctx) {
-    return IoPool_getFile(&ctx->base);
 }
 
 /* ReadPool_create:
