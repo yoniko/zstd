@@ -530,7 +530,7 @@ size_t ReadPool_fillBuffer(read_pool_ctx_t *ctx, size_t n) {
     assert(n <= ctx->srcBufferBaseSize/2);
     while (ctx->srcBufferLoaded < n) {
         job = ReadPool_getNextCompletedJob(ctx);
-       if(job == NULL)
+        if(job == NULL)
             break;
         srcBufferOffsetFromBase = ctx->srcBuffer - ctx->srcBufferBase;
         srcBufferRemainingSpace = ctx->srcBufferBaseSize - (srcBufferOffsetFromBase + ctx->srcBufferLoaded);
