@@ -3,17 +3,14 @@
 #include <stdlib.h>     /* malloc, free */
 #include <assert.h>
 #include <errno.h>      /* errno */
-#include "timefn.h"     /* UTIL_getTime, UTIL_clockSpanMicro */
 
 #if defined (_MSC_VER)
 #  include <sys/stat.h>
 #  include <io.h>
 #endif
 
-#include "fileio_utils.h"
-
-FIO_display_prefs_t g_display_prefs = {2, FIO_ps_auto};
-UTIL_time_t g_displayClock = UTIL_TIME_INITIALIZER;
+#include "fileio_asycio.h"
+#include "fileio_common.h"
 
 /* **********************************************************************
  *  Sparse write

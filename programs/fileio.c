@@ -41,7 +41,11 @@
 #endif
 
 #include "fileio.h"
-#include "fileio_utils.h"
+#include "fileio_asycio.h"
+#include "fileio_common.h"
+
+FIO_display_prefs_t g_display_prefs = {2, FIO_ps_auto};
+UTIL_time_t g_displayClock = UTIL_TIME_INITIALIZER;
 
 #define ZSTD_STATIC_LINKING_ONLY   /* ZSTD_magicNumber, ZSTD_frameHeaderSize_max */
 #include "../lib/zstd.h"
@@ -66,6 +70,21 @@
 #endif
 
 
+/*-*************************************
+*  Constants
+***************************************/
+#define ADAPT_WINDOWLOG_DEFAULT 23   /* 8 MB */
+#define DICTSIZE_MAX (32 MB)   /* protection against large input (attack scenario) */
+
+#define FNSPACE 30
+
+/* Default file permissions 0666 (modulated by umask) */
+#if !defined(_WIN32)
+/* These macros aren't defined on windows. */
+#define DEFAULT_FILE_PERMISSIONS (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH)
+#else
+#define DEFAULT_FILE_PERMISSIONS (0666)
+#endif
 
 /*-************************************
 *  Signal (Ctrl-C trapping)
