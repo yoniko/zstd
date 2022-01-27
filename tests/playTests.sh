@@ -183,7 +183,17 @@ else
 fi
 
 
-for i in {1..1000}; do datagen -g2M  | zstd -v3 --no-asyncio --format=lz4 -q | zstd -d3 --no-asyncio --format=lz4 -t -q ; done
+roundTripTest -g2M "3 --asyncio --format=lz4"
+roundTripTest -g2M "3 --no-asyncio --format=lz4"
+roundTripTest -g2M "3 --asyncio --format=lz4"
+roundTripTest -g2M "3 --no-asyncio --format=lz4"
+roundTripTest -g2M "3 --asyncio --format=lz4"
+roundTripTest -g2M "3 --no-asyncio --format=lz4"
+roundTripTest -g2M "3 --asyncio --format=lz4"
+roundTripTest -g2M "3 --no-asyncio --format=lz4"
+roundTripTest -g2M "3 --asyncio --format=lz4"
+roundTripTest -g2M "3 --no-asyncio --format=lz4"
+for i in {1..100}; do datagen -g2M  | zstd -v3 --no-asyncio --format=lz4 -q | zstd -d3 --no-asyncio --format=lz4 -t -q ; done
 
 #println "\n===>  simple tests "
 #
