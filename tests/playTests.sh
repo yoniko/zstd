@@ -1606,9 +1606,9 @@ fi
 println "\n===>  zstd asyncio tests "
 
 addFrame() {
-    datagen -g2M -s$2 >> tmp_uncompressed
-    println "\n===>  Adding frame : datagen -g2M -s$2 | zstd --format=$1 >> tmp_compressed.zst "
-    datagen -g2M -s$2 | zstd --format=$1 >> tmp_compressed.zst
+    datagen -g20M -s$2 >> tmp_uncompressed
+    println "\n===>  Adding frame : datagen -g20M -s$2 | zstd --format=$1 >> tmp_compressed.zst "
+    datagen -g20M -s$2 | zstd --format=$1 >> tmp_compressed.zst
 }
 
 addTwoFrames() {
