@@ -29,12 +29,43 @@ jobs:
 #      run: make test
 
   # lasts ~26mn
-  make-test-osx:
+  make-test-osx1:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v2
     - name: OS-X test
       run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx2:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx3:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx4:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx5:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
 
 #  no-intrinsics-fuzztest:
 #    runs-on: ubuntu-latest

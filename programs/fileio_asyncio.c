@@ -293,6 +293,7 @@ IOJob_t* AIO_WritePool_acquireJob(WritePoolCtx_t* ctx) {
 void AIO_WritePool_enqueueAndReacquireWriteJob(IOJob_t **job) {
     AIO_IOPool_enqueueJob(*job);
     *job = AIO_IOPool_acquireJob((IOPoolCtx_t *)(*job)->ctx);
+    memset((*job)->buffer, 0xff, (*job)->bufferSize);
 }
 
 /* AIO_WritePool_sparseWriteEnd:

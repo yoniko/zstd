@@ -195,6 +195,8 @@ fi
 #roundTripTest -g2M "3 --no-asyncio --format=lz4"
 #for i in {1..100}; do datagen -g2M  | zstd -v3 --no-asyncio --format=lz4 -q | zstd -d3 --no-asyncio --format=lz4 -t -q ; done
 #
+zstd -vvV
+
 println "\n===>  simple tests "
 
 datagen > tmp
