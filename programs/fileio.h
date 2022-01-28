@@ -165,7 +165,9 @@ int FIO_checkFilenameCollisions(const char** filenameTable, unsigned nbFiles);
 
 /* custom crash signal handler */
 void FIO_addAbortHandler(void);
-
+char const* FIO_zlibVersion(void);
+char const* FIO_lz4Version(void);
+char const* FIO_lzmaVersion(void);
 
 
 #if defined (__cplusplus)

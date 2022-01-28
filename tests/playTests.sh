@@ -183,6 +183,19 @@ else
 fi
 
 
+#roundTripTest -g2M "3 --asyncio --format=lz4"
+#roundTripTest -g2M "3 --no-asyncio --format=lz4"
+#roundTripTest -g2M "3 --asyncio --format=lz4"
+#roundTripTest -g2M "3 --no-asyncio --format=lz4"
+#roundTripTest -g2M "3 --asyncio --format=lz4"
+#roundTripTest -g2M "3 --no-asyncio --format=lz4"
+#roundTripTest -g2M "3 --asyncio --format=lz4"
+#roundTripTest -g2M "3 --no-asyncio --format=lz4"
+#roundTripTest -g2M "3 --asyncio --format=lz4"
+#roundTripTest -g2M "3 --no-asyncio --format=lz4"
+#for i in {1..100}; do datagen -g2M  | zstd -v3 --no-asyncio --format=lz4 -q | zstd -d3 --no-asyncio --format=lz4 -t -q ; done
+#
+zstd -vvV
 
 println "\n===>  simple tests "
 
@@ -259,10 +272,12 @@ zstd -dc - < tmp.zst > $INTOVOID
 zstd -d    < tmp.zst > $INTOVOID   # implicit stdout when stdin is used
 zstd -d  - < tmp.zst > $INTOVOID
 println "test : impose memory limitation (must fail)"
-zstd -d -f tmp.zst -M2K -c > $INTOVOID && die "decompression needs more memory than allowed"
-zstd -d -f tmp.zst --memlimit=2K -c > $INTOVOID && die "decompression needs more memory than allowed"  # long command
-zstd -d -f tmp.zst --memory=2K -c > $INTOVOID && die "decompression needs more memory than allowed"  # long command
-zstd -d -f tmp.zst --memlimit-decompress=2K -c > $INTOVOID && die "decompression needs more memory than allowed"  # long command
+datagen -g500K > tmplimit
+zstd -f tmplimit
+zstd -d -f tmplimit.zst -M2K -c > $INTOVOID && die "decompression needs more memory than allowed"
+zstd -d -f tmplimit.zst --memlimit=2K -c > $INTOVOID && die "decompression needs more memory than allowed"  # long command
+zstd -d -f tmplimit.zst --memory=2K -c > $INTOVOID && die "decompression needs more memory than allowed"  # long command
+zstd -d -f tmplimit.zst --memlimit-decompress=2K -c > $INTOVOID && die "decompression needs more memory than allowed"  # long command
 println "test : overwrite protection"
 zstd -q tmp && die "overwrite check failed!"
 println "test : force overwrite"
@@ -1590,10 +1605,11 @@ elif [ "$longCSize19wlog23" -gt "$optCSize19wlog23" ]; then
     exit 1
 fi
 
-println "\n===>  zstd asyncio decompression tests "
+println "\n===>  zstd asyncio tests "
 
 addFrame() {
     datagen -g2M -s$2 >> tmp_uncompressed
+    println "\n===>  Adding frame : datagen -g20M -s$2 | zstd --format=$1 >> tmp_compressed.zst "
     datagen -g2M -s$2 | zstd --format=$1 >> tmp_compressed.zst
 }
 
