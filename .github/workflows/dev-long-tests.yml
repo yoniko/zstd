@@ -29,6 +29,13 @@ jobs:
 #      run: make test
 
   # lasts ~26mn
+  make-test-osx0:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+        
   make-test-osx1:
     runs-on: macos-latest
     steps:
@@ -67,6 +74,187 @@ jobs:
       - name: OS-X test
         run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
 
+  make-test-osx6:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx7:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx8:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx9:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx10:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx11:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx12:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx13:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx14:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx15:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx16:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx17:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx18:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx19:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx20:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx21:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx22:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx23:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx24:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx25:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx26:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+  make-test-osx27:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx28:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+
+
+  make-test-osx29:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: OS-X test
+        run: make shortest # make -c lib all doesn't work because of the fact that it's not a tty
+        
 #  no-intrinsics-fuzztest:
 #    runs-on: ubuntu-latest
 #    steps:
