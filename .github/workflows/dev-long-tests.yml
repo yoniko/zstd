@@ -34,30 +34,72 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
         
   make-test-osx1:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v2
     - name: OS-X test
-      run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-    - name: Setup tmate session
+      run: |
+        ulimit -c unlimited
+        sudo make shortest
+    - name: Chmod cores directory
       if: ${{ failure() }}
-      uses: mxschmitt/action-tmate@v3
+      run: sudo chmod -R +rwx /cores/*
+    - name: Upload failure artifacts
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@master
+      with:
+        name: crashes
+        path: /cores
+    - name: Upload binary artifacts
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@master
+      with:
+        name: zstdbin
+        path: ./programs/zstd
 
   make-test-osx2:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx3:
@@ -65,10 +107,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx4:
@@ -76,10 +132,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx5:
@@ -87,30 +157,72 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx6:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx7:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx8:
@@ -118,10 +230,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx9:
@@ -129,10 +255,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx10:
@@ -140,30 +280,72 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx11:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx12:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx13:
@@ -171,10 +353,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx14:
@@ -182,10 +378,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx15:
@@ -193,30 +403,72 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx16:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx17:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx18:
@@ -224,10 +476,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx19:
@@ -235,40 +501,96 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx20:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx21:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx22:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx23:
@@ -276,10 +598,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx24:
@@ -287,10 +623,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx25:
@@ -298,30 +648,72 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx26:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
   make-test-osx27:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx28:
@@ -329,10 +721,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
 
 
   make-test-osx29:
@@ -340,10 +746,24 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: OS-X test
-        run: ulimit -c unlimited && sudo make shortest # make -c lib all doesn't work because of the fact that it's not a tty
-      - name: Setup tmate session
+        run: |
+          ulimit -c unlimited
+          sudo make shortest
+      - name: Chmod cores directory
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+        run: sudo chmod -R +rwx /cores/*
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: crashes
+          path: /cores
+      - name: Upload binary artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@master
+        with:
+          name: zstdbin
+          path: ./programs/zstd
         
 #  no-intrinsics-fuzztest:
 #    runs-on: ubuntu-latest
