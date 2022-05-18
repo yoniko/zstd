@@ -1,7 +1,7 @@
 from typing import List, Optional, Literal, Union
 from pydantic import BaseModel
 
-from cases import BenchmarkCase, DecompressBenchmarkCase
+from cases import BenchmarkCase, DecompressBenchmarkCase, CompressDecompressBenchmarkCase
 
 
 class BenchmarkTypeBase(BaseModel):
@@ -27,7 +27,23 @@ class BenchmarkDecompressFile(BenchmarkTypeBase):
         ]
 
 
-BenchmarkAction = Union[BenchmarkDecompressFile]
+class BenchmarkCompressFile(BenchmarkTypeBase):
+    type: Literal['compress-files']
+    inputs: List[str]
+    additional_flags: List[str] = []
+
+    def get_cases(self) -> List[BenchmarkCase]:
+        return [
+            CompressDecompressBenchmarkCase(command_line_args=[file] + self.additional_flags,
+                                    results_columns={"type": self.type, "file": file,
+                                                     "additional_flags": ' '.join(self.additional_flags)},
+                                    repeats=self.repeats)
+            for file in self.inputs
+        ]
+
+
+
+BenchmarkAction = Union[BenchmarkDecompressFile, BenchmarkCompressFile]
 
 
 class BenchmarkConfig(BaseModel):

@@ -1,20 +1,19 @@
 {
   "benchmarks": [
     {
-      "type": "decompress-files",
+      "type": "compress-files",
       "inputs": [
         "enwik8.zst",
         "silesia.tar.zst"
       ],
-      "repeats": 10
+      "repeats": 5,
+      "additional_flags": ["-b1"]
     }
   ],
   "compilers": [
-    "clang-12"
+    "clang"
   ],
   "git_labels": [
-    "dev",
-    "refactor_exec_sequence"
-  ],
-  "cpu": 4
+    ""
+  ]
 }
