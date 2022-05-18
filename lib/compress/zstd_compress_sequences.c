@@ -84,11 +84,12 @@ static size_t ZSTD_NCountCost(unsigned const* count, unsigned const max,
 static size_t ZSTD_entropyCost(unsigned const* count, unsigned const max, size_t const total)
 {
     unsigned cost = 0;
-    unsigned s;
+    unsigned s = 0;
 
     assert(total > 0);
+    uint64_t norm_factor = ((uint64_t)1 << 62) / total;
     for (s = 0; s <= max; ++s) {
-        unsigned norm = (unsigned)((256 * count[s]) / total);
+        unsigned norm = (unsigned)((count[s]*norm_factor)>>(62-8));
         if (count[s] != 0 && norm == 0)
             norm = 1;
         assert(count[s] < total);
