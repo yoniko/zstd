@@ -49,6 +49,4 @@ size_t ZSTD_fseBitCost(
     unsigned const* count,
     unsigned const max);
 
-size_t ZSTD_crossEntropyCost(short const* norm, unsigned accuracyLog,
-                             unsigned const* count, unsigned const max);
 #endif /* ZSTD_COMPRESS_SEQUENCES_H */

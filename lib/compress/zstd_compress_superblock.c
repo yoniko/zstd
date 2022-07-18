@@ -18,6 +18,7 @@
 #include "zstd_compress_internal.h"   /* ZSTD_[huf|fse|entropy]CTablesMetadata_t */
 #include "zstd_compress_sequences.h"
 #include "zstd_compress_literals.h"
+#include "zstd_entropy.h"
 
 /** ZSTD_compressSubBlock_literal() :
  *  Compresses literals section for a sub-block.
