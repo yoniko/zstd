@@ -65,15 +65,10 @@ static UNUSED_ATTR const U32 ML_base[MaxML+1] = {
  } ZSTD_seqSymbol_header;
 
  typedef struct {
-     union {
-         struct {
-             BYTE nbAdditionalBits;
-             BYTE nbBits;
-             U16  nextState;
-             U32  baseValue;
-         };
-         U64 raw;
-     };
+     BYTE nbAdditionalBits;
+     BYTE nbBits;
+     U16  nextState;
+     U32  baseValue;
  } ZSTD_seqSymbol;
 
  #define SEQSYMBOL_TABLE_SIZE(log)   (1 + (1 << (log)))

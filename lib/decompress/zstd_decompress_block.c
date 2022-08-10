@@ -1265,37 +1265,33 @@ ZSTD_decodeSequence(seqState_t* seqState, const ZSTD_longOffset_e longOffsets)
      * operations that cause performance drop. This can be avoided by using this
      * ZSTD_memcpy hack.
      */
-//#if defined(__aarch64__) && (defined(__GNUC__) && !defined(__clang__))
-#if 1
+#if defined(__aarch64__) && (defined(__GNUC__) && !defined(__clang__))
     ZSTD_seqSymbol llDInfoS, mlDInfoS, ofDInfoS;
-    llDInfoS.raw = seqState->stateLL.table[seqState->stateLL.state].raw;
-    mlDInfoS.raw = seqState->stateML.table[seqState->stateML.state].raw;
-    ofDInfoS.raw = seqState->stateOffb.table[seqState->stateOffb.state].raw;
-//    const ZSTD_seqSymbol* const llDInfo = &llDInfoS;
-//    const ZSTD_seqSymbol* const mlDInfo = &mlDInfoS;
-//    const ZSTD_seqSymbol* const ofDInfo = &ofDInfoS;
-//    ZSTD_memcpy(llDInfo, seqState->stateLL.table + seqState->stateLL.state, sizeof(ZSTD_seqSymbol));
-//    ZSTD_memcpy(mlDInfo, seqState->stateML.table + seqState->stateML.state, sizeof(ZSTD_seqSymbol));
-//    ZSTD_memcpy(ofDInfo, seqState->stateOffb.table + seqState->stateOffb.state, sizeof(ZSTD_seqSymbol));
+    ZSTD_seqSymbol* const llDInfo = &llDInfoS;
+    ZSTD_seqSymbol* const mlDInfo = &mlDInfoS;
+    ZSTD_seqSymbol* const ofDInfo = &ofDInfoS;
+    ZSTD_memcpy(llDInfo, seqState->stateLL.table + seqState->stateLL.state, sizeof(ZSTD_seqSymbol));
+    ZSTD_memcpy(mlDInfo, seqState->stateML.table + seqState->stateML.state, sizeof(ZSTD_seqSymbol));
+    ZSTD_memcpy(ofDInfo, seqState->stateOffb.table + seqState->stateOffb.state, sizeof(ZSTD_seqSymbol));
 #else
     const ZSTD_seqSymbol* const llDInfo = seqState->stateLL.table + seqState->stateLL.state;
     const ZSTD_seqSymbol* const mlDInfo = seqState->stateML.table + seqState->stateML.state;
     const ZSTD_seqSymbol* const ofDInfo = seqState->stateOffb.table + seqState->stateOffb.state;
 #endif
-    seq.matchLength = mlDInfoS.baseValue;
-    seq.litLength = llDInfoS.baseValue;
-    {   U32 const ofBase = ofDInfoS.baseValue;
-        BYTE const llBits = llDInfoS.nbAdditionalBits;
-        BYTE const mlBits = mlDInfoS.nbAdditionalBits;
-        BYTE const ofBits = ofDInfoS.nbAdditionalBits;
+    seq.matchLength = mlDInfo->baseValue;
+    seq.litLength = llDInfo->baseValue;
+    {   U32 const ofBase = ofDInfo->baseValue;
+        BYTE const llBits = llDInfo->nbAdditionalBits;
+        BYTE const mlBits = mlDInfo->nbAdditionalBits;
+        BYTE const ofBits = ofDInfo->nbAdditionalBits;
         BYTE const totalBits = llBits+mlBits+ofBits;
 
-        U16 const llNext = llDInfoS.nextState;
-        U16 const mlNext = mlDInfoS.nextState;
-        U16 const ofNext = ofDInfoS.nextState;
-        U32 const llnbBits = llDInfoS.nbBits;
-        U32 const mlnbBits = mlDInfoS.nbBits;
-        U32 const ofnbBits = ofDInfoS.nbBits;
+        U16 const llNext = llDInfo->nextState;
+        U16 const mlNext = mlDInfo->nextState;
+        U16 const ofNext = ofDInfo->nextState;
+        U32 const llnbBits = llDInfo->nbBits;
+        U32 const mlnbBits = mlDInfo->nbBits;
+        U32 const ofnbBits = ofDInfo->nbBits;
         /*
          * As gcc has better branch and block analyzers, sometimes it is only
          * valuable to mark likeliness for clang, it gives around 3-4% of
@@ -1326,7 +1322,7 @@ ZSTD_decodeSequence(seqState_t* seqState, const ZSTD_longOffset_e longOffsets)
                 seqState->prevOffset[1] = seqState->prevOffset[0];
                 seqState->prevOffset[0] = offset;
             } else {
-                U32 const ll0 = (llDInfoS.baseValue == 0);
+                U32 const ll0 = (llDInfo->baseValue == 0);
                 if (LIKELY((ofBits == 0))) {
                     offset = seqState->prevOffset[ll0];
                     seqState->prevOffset[1] = seqState->prevOffset[!ll0];
