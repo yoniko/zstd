@@ -595,9 +595,9 @@ typedef struct {
 
 typedef struct
 {
-    unsigned short newState;
-    unsigned char  symbol;
     unsigned char  nbBits;
+    unsigned char  symbol;
+    unsigned short newState;
 } FSE_decode_t;   /* size == U32 */
 
 MEM_STATIC void FSE_initDState(FSE_DState_t* DStatePtr, BIT_DStream_t* bitD, const FSE_DTable* dt)
@@ -636,7 +636,7 @@ MEM_STATIC BYTE FSE_decodeSymbol(FSE_DState_t* DStatePtr, BIT_DStream_t* bitD)
 
 /*! FSE_decodeSymbolFast() :
     unsafe, only works if no symbol has a probability > 50% */
-MEM_STATIC BYTE FSE_decodeSymbolFast(FSE_DState_t* DStatePtr, BIT_DStream_t* bitD)
+MEM_STATIC BYTE FSE_decodeSymbolFast(FSE_DState_t* restrict DStatePtr, BIT_DStream_t* restrict bitD)
 {
     FSE_decode_t const DInfo = ((const FSE_decode_t*)(DStatePtr->table))[DStatePtr->state];
     U32 const nbBits = DInfo.nbBits;
@@ -644,6 +644,7 @@ MEM_STATIC BYTE FSE_decodeSymbolFast(FSE_DState_t* DStatePtr, BIT_DStream_t* bit
     size_t const lowBits = BIT_readBitsFast(bitD, nbBits);
 
     DStatePtr->state = DInfo.newState + lowBits;
+//    PREFETCH_L1((const void*)(((const FSE_decode_t*)(DStatePtr->table))+ DStatePtr->state));
     return symbol;
 }
 

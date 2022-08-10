@@ -323,102 +323,182 @@ size_t ZSTD_decodeLiteralsBlock(ZSTD_DCtx* dctx,
  * - pretify output, report below, test with fuzzer to ensure it's correct */
 
 /* Default FSE distribution table for Literal Lengths */
-static const ZSTD_seqSymbol LL_defaultDTable[(1<<LL_DEFAULTNORMLOG)+1] = {
-     {  1,  1,  1, LL_DEFAULTNORMLOG},  /* header : fastMode, tableLog */
-     /* nextState, nbAddBits, nbBits, baseVal */
-     {  0,  0,  4,    0},  { 16,  0,  4,    0},
-     { 32,  0,  5,    1},  {  0,  0,  5,    3},
-     {  0,  0,  5,    4},  {  0,  0,  5,    6},
-     {  0,  0,  5,    7},  {  0,  0,  5,    9},
-     {  0,  0,  5,   10},  {  0,  0,  5,   12},
-     {  0,  0,  6,   14},  {  0,  1,  5,   16},
-     {  0,  1,  5,   20},  {  0,  1,  5,   22},
-     {  0,  2,  5,   28},  {  0,  3,  5,   32},
-     {  0,  4,  5,   48},  { 32,  6,  5,   64},
-     {  0,  7,  5,  128},  {  0,  8,  6,  256},
-     {  0, 10,  6, 1024},  {  0, 12,  6, 4096},
-     { 32,  0,  4,    0},  {  0,  0,  4,    1},
-     {  0,  0,  5,    2},  { 32,  0,  5,    4},
-     {  0,  0,  5,    5},  { 32,  0,  5,    7},
-     {  0,  0,  5,    8},  { 32,  0,  5,   10},
-     {  0,  0,  5,   11},  {  0,  0,  6,   13},
-     { 32,  1,  5,   16},  {  0,  1,  5,   18},
-     { 32,  1,  5,   22},  {  0,  2,  5,   24},
-     { 32,  3,  5,   32},  {  0,  3,  5,   40},
-     {  0,  6,  4,   64},  { 16,  6,  4,   64},
-     { 32,  7,  5,  128},  {  0,  9,  6,  512},
-     {  0, 11,  6, 2048},  { 48,  0,  4,    0},
-     { 16,  0,  4,    1},  { 32,  0,  5,    2},
-     { 32,  0,  5,    3},  { 32,  0,  5,    5},
-     { 32,  0,  5,    6},  { 32,  0,  5,    8},
-     { 32,  0,  5,    9},  { 32,  0,  5,   11},
-     { 32,  0,  5,   12},  {  0,  0,  6,   15},
-     { 32,  1,  5,   18},  { 32,  1,  5,   20},
-     { 32,  2,  5,   24},  { 32,  2,  5,   28},
-     { 32,  3,  5,   40},  { 32,  4,  5,   48},
-     {  0, 16,  6,65536},  {  0, 15,  6,32768},
-     {  0, 14,  6,16384},  {  0, 13,  6, 8192},
+static const ZSTD_seqSymbol LL_defaultDTable[(1 << LL_DEFAULTNORMLOG) + 1] = {
+        {.nextState=1,  .nbAdditionalBits=1,  .nbBits=1, .baseValue=LL_DEFAULTNORMLOG},  /* header : fastMode, tableLog */
+        /* nextState, nbAddBits, nbBits, baseVal */
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=4, .baseValue=0},
+        {.nextState=16, .nbAdditionalBits=0,  .nbBits=4, .baseValue=0},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=1},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=3},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=4},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=6},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=7},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=9},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=10},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=12},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=14},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=5, .baseValue=16},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=5, .baseValue=20},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=5, .baseValue=22},
+        {.nextState=0,  .nbAdditionalBits=2,  .nbBits=5, .baseValue=28},
+        {.nextState=0,  .nbAdditionalBits=3,  .nbBits=5, .baseValue=32},
+        {.nextState=0,  .nbAdditionalBits=4,  .nbBits=5, .baseValue=48},
+        {.nextState=32, .nbAdditionalBits=6,  .nbBits=5, .baseValue=64},
+        {.nextState=0,  .nbAdditionalBits=7,  .nbBits=5, .baseValue=128},
+        {.nextState=0,  .nbAdditionalBits=8,  .nbBits=6, .baseValue=256},
+        {.nextState=0,  .nbAdditionalBits=10, .nbBits=6, .baseValue=1024},
+        {.nextState=0,  .nbAdditionalBits=12, .nbBits=6, .baseValue=4096},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=4, .baseValue=0},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=4, .baseValue=1},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=2},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=4},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=5},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=7},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=8},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=10},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=11},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=13},
+        {.nextState=32, .nbAdditionalBits=1,  .nbBits=5, .baseValue=16},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=5, .baseValue=18},
+        {.nextState=32, .nbAdditionalBits=1,  .nbBits=5, .baseValue=22},
+        {.nextState=0,  .nbAdditionalBits=2,  .nbBits=5, .baseValue=24},
+        {.nextState=32, .nbAdditionalBits=3,  .nbBits=5, .baseValue=32},
+        {.nextState=0,  .nbAdditionalBits=3,  .nbBits=5, .baseValue=40},
+        {.nextState=0,  .nbAdditionalBits=6,  .nbBits=4, .baseValue=64},
+        {.nextState=16, .nbAdditionalBits=6,  .nbBits=4, .baseValue=64},
+        {.nextState=32, .nbAdditionalBits=7,  .nbBits=5, .baseValue=128},
+        {.nextState=0,  .nbAdditionalBits=9,  .nbBits=6, .baseValue=512},
+        {.nextState=0,  .nbAdditionalBits=11, .nbBits=6, .baseValue=2048},
+        {.nextState=48, .nbAdditionalBits=0,  .nbBits=4, .baseValue=0},
+        {.nextState=16, .nbAdditionalBits=0,  .nbBits=4, .baseValue=1},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=2},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=3},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=5},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=6},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=8},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=9},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=11},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=12},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=15},
+        {.nextState=32, .nbAdditionalBits=1,  .nbBits=5, .baseValue=18},
+        {.nextState=32, .nbAdditionalBits=1,  .nbBits=5, .baseValue=20},
+        {.nextState=32, .nbAdditionalBits=2,  .nbBits=5, .baseValue=24},
+        {.nextState=32, .nbAdditionalBits=2,  .nbBits=5, .baseValue=28},
+        {.nextState=32, .nbAdditionalBits=3,  .nbBits=5, .baseValue=40},
+        {.nextState=32, .nbAdditionalBits=4,  .nbBits=5, .baseValue=48},
+        {.nextState=0,  .nbAdditionalBits=16, .nbBits=6, .baseValue=65536},
+        {.nextState=0,  .nbAdditionalBits=15, .nbBits=6, .baseValue=32768},
+        {.nextState=0,  .nbAdditionalBits=14, .nbBits=6, .baseValue=16384},
+        {.nextState=0,  .nbAdditionalBits=13, .nbBits=6, .baseValue=8192},
 };   /* LL_defaultDTable */
 
 /* Default FSE distribution table for Offset Codes */
 static const ZSTD_seqSymbol OF_defaultDTable[(1<<OF_DEFAULTNORMLOG)+1] = {
-    {  1,  1,  1, OF_DEFAULTNORMLOG},  /* header : fastMode, tableLog */
-    /* nextState, nbAddBits, nbBits, baseVal */
-    {  0,  0,  5,    0},     {  0,  6,  4,   61},
-    {  0,  9,  5,  509},     {  0, 15,  5,32765},
-    {  0, 21,  5,2097149},   {  0,  3,  5,    5},
-    {  0,  7,  4,  125},     {  0, 12,  5, 4093},
-    {  0, 18,  5,262141},    {  0, 23,  5,8388605},
-    {  0,  5,  5,   29},     {  0,  8,  4,  253},
-    {  0, 14,  5,16381},     {  0, 20,  5,1048573},
-    {  0,  2,  5,    1},     { 16,  7,  4,  125},
-    {  0, 11,  5, 2045},     {  0, 17,  5,131069},
-    {  0, 22,  5,4194301},   {  0,  4,  5,   13},
-    { 16,  8,  4,  253},     {  0, 13,  5, 8189},
-    {  0, 19,  5,524285},    {  0,  1,  5,    1},
-    { 16,  6,  4,   61},     {  0, 10,  5, 1021},
-    {  0, 16,  5,65533},     {  0, 28,  5,268435453},
-    {  0, 27,  5,134217725}, {  0, 26,  5,67108861},
-    {  0, 25,  5,33554429},  {  0, 24,  5,16777213},
+        {.nextState=1,  .nbAdditionalBits=1,  .nbBits=1, .baseValue=OF_DEFAULTNORMLOG},  /* header : fastMode, tableLog */
+        /* nextState, nbAddBits, nbBits, baseVal */
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=0},
+        {.nextState=0,  .nbAdditionalBits=6,  .nbBits=4, .baseValue=61},
+        {.nextState=0,  .nbAdditionalBits=9,  .nbBits=5, .baseValue=509},
+        {.nextState=0,  .nbAdditionalBits=15, .nbBits=5, .baseValue=32765},
+        {.nextState=0,  .nbAdditionalBits=21, .nbBits=5, .baseValue=2097149},
+        {.nextState=0,  .nbAdditionalBits=3,  .nbBits=5, .baseValue=5},
+        {.nextState=0,  .nbAdditionalBits=7,  .nbBits=4, .baseValue=125},
+        {.nextState=0,  .nbAdditionalBits=12, .nbBits=5, .baseValue=4093},
+        {.nextState=0,  .nbAdditionalBits=18, .nbBits=5, .baseValue=262141},
+        {.nextState=0,  .nbAdditionalBits=23, .nbBits=5, .baseValue=8388605},
+        {.nextState=0,  .nbAdditionalBits=5,  .nbBits=5, .baseValue=29},
+        {.nextState=0,  .nbAdditionalBits=8,  .nbBits=4, .baseValue=253},
+        {.nextState=0,  .nbAdditionalBits=14, .nbBits=5, .baseValue=16381},
+        {.nextState=0,  .nbAdditionalBits=20, .nbBits=5, .baseValue=1048573},
+        {.nextState=0,  .nbAdditionalBits=2,  .nbBits=5, .baseValue=1},
+        {.nextState=16, .nbAdditionalBits=7,  .nbBits=4, .baseValue=125},
+        {.nextState=0,  .nbAdditionalBits=11, .nbBits=5, .baseValue=2045},
+        {.nextState=0,  .nbAdditionalBits=17, .nbBits=5, .baseValue=131069},
+        {.nextState=0,  .nbAdditionalBits=22, .nbBits=5, .baseValue=4194301},
+        {.nextState=0,  .nbAdditionalBits=4,  .nbBits=5, .baseValue=13},
+        {.nextState=16, .nbAdditionalBits=8,  .nbBits=4, .baseValue=253},
+        {.nextState=0,  .nbAdditionalBits=13, .nbBits=5, .baseValue=8189},
+        {.nextState=0,  .nbAdditionalBits=19, .nbBits=5, .baseValue=524285},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=5, .baseValue=1},
+        {.nextState=16, .nbAdditionalBits=6,  .nbBits=4, .baseValue=61},
+        {.nextState=0,  .nbAdditionalBits=10, .nbBits=5, .baseValue=1021},
+        {.nextState=0,  .nbAdditionalBits=16, .nbBits=5, .baseValue=65533},
+        {.nextState=0,  .nbAdditionalBits=28, .nbBits=5, .baseValue=268435453},
+        {.nextState=0,  .nbAdditionalBits=27, .nbBits=5, .baseValue=134217725},
+        {.nextState=0,  .nbAdditionalBits=26, .nbBits=5, .baseValue=67108861},
+        {.nextState=0,  .nbAdditionalBits=25, .nbBits=5, .baseValue=33554429},
+        {.nextState=0,  .nbAdditionalBits=24, .nbBits=5, .baseValue=16777213},
 };   /* OF_defaultDTable */
 
 
 /* Default FSE distribution table for Match Lengths */
 static const ZSTD_seqSymbol ML_defaultDTable[(1<<ML_DEFAULTNORMLOG)+1] = {
-    {  1,  1,  1, ML_DEFAULTNORMLOG},  /* header : fastMode, tableLog */
-    /* nextState, nbAddBits, nbBits, baseVal */
-    {  0,  0,  6,    3},  {  0,  0,  4,    4},
-    { 32,  0,  5,    5},  {  0,  0,  5,    6},
-    {  0,  0,  5,    8},  {  0,  0,  5,    9},
-    {  0,  0,  5,   11},  {  0,  0,  6,   13},
-    {  0,  0,  6,   16},  {  0,  0,  6,   19},
-    {  0,  0,  6,   22},  {  0,  0,  6,   25},
-    {  0,  0,  6,   28},  {  0,  0,  6,   31},
-    {  0,  0,  6,   34},  {  0,  1,  6,   37},
-    {  0,  1,  6,   41},  {  0,  2,  6,   47},
-    {  0,  3,  6,   59},  {  0,  4,  6,   83},
-    {  0,  7,  6,  131},  {  0,  9,  6,  515},
-    { 16,  0,  4,    4},  {  0,  0,  4,    5},
-    { 32,  0,  5,    6},  {  0,  0,  5,    7},
-    { 32,  0,  5,    9},  {  0,  0,  5,   10},
-    {  0,  0,  6,   12},  {  0,  0,  6,   15},
-    {  0,  0,  6,   18},  {  0,  0,  6,   21},
-    {  0,  0,  6,   24},  {  0,  0,  6,   27},
-    {  0,  0,  6,   30},  {  0,  0,  6,   33},
-    {  0,  1,  6,   35},  {  0,  1,  6,   39},
-    {  0,  2,  6,   43},  {  0,  3,  6,   51},
-    {  0,  4,  6,   67},  {  0,  5,  6,   99},
-    {  0,  8,  6,  259},  { 32,  0,  4,    4},
-    { 48,  0,  4,    4},  { 16,  0,  4,    5},
-    { 32,  0,  5,    7},  { 32,  0,  5,    8},
-    { 32,  0,  5,   10},  { 32,  0,  5,   11},
-    {  0,  0,  6,   14},  {  0,  0,  6,   17},
-    {  0,  0,  6,   20},  {  0,  0,  6,   23},
-    {  0,  0,  6,   26},  {  0,  0,  6,   29},
-    {  0,  0,  6,   32},  {  0, 16,  6,65539},
-    {  0, 15,  6,32771},  {  0, 14,  6,16387},
-    {  0, 13,  6, 8195},  {  0, 12,  6, 4099},
-    {  0, 11,  6, 2051},  {  0, 10,  6, 1027},
+        {.nextState=1,  .nbAdditionalBits=1,  .nbBits=1, .baseValue=ML_DEFAULTNORMLOG},  /* header : fastMode, tableLog */
+        /* nextState, nbAddBits, nbBits, baseVal */
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=3},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=4, .baseValue=4},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=5},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=6},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=8},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=9},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=11},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=13},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=16},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=19},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=22},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=25},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=28},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=31},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=34},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=6, .baseValue=37},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=6, .baseValue=41},
+        {.nextState=0,  .nbAdditionalBits=2,  .nbBits=6, .baseValue=47},
+        {.nextState=0,  .nbAdditionalBits=3,  .nbBits=6, .baseValue=59},
+        {.nextState=0,  .nbAdditionalBits=4,  .nbBits=6, .baseValue=83},
+        {.nextState=0,  .nbAdditionalBits=7,  .nbBits=6, .baseValue=131},
+        {.nextState=0,  .nbAdditionalBits=9,  .nbBits=6, .baseValue=515},
+        {.nextState=16, .nbAdditionalBits=0,  .nbBits=4, .baseValue=4},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=4, .baseValue=5},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=6},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=7},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=9},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=5, .baseValue=10},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=12},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=15},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=18},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=21},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=24},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=27},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=30},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=33},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=6, .baseValue=35},
+        {.nextState=0,  .nbAdditionalBits=1,  .nbBits=6, .baseValue=39},
+        {.nextState=0,  .nbAdditionalBits=2,  .nbBits=6, .baseValue=43},
+        {.nextState=0,  .nbAdditionalBits=3,  .nbBits=6, .baseValue=51},
+        {.nextState=0,  .nbAdditionalBits=4,  .nbBits=6, .baseValue=67},
+        {.nextState=0,  .nbAdditionalBits=5,  .nbBits=6, .baseValue=99},
+        {.nextState=0,  .nbAdditionalBits=8,  .nbBits=6, .baseValue=259},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=4, .baseValue=4},
+        {.nextState=48, .nbAdditionalBits=0,  .nbBits=4, .baseValue=4},
+        {.nextState=16, .nbAdditionalBits=0,  .nbBits=4, .baseValue=5},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=7},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=8},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=10},
+        {.nextState=32, .nbAdditionalBits=0,  .nbBits=5, .baseValue=11},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=14},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=17},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=20},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=23},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=26},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=29},
+        {.nextState=0,  .nbAdditionalBits=0,  .nbBits=6, .baseValue=32},
+        {.nextState=0,  .nbAdditionalBits=16, .nbBits=6, .baseValue=65539},
+        {.nextState=0,  .nbAdditionalBits=15, .nbBits=6, .baseValue=32771},
+        {.nextState=0,  .nbAdditionalBits=14, .nbBits=6, .baseValue=16387},
+        {.nextState=0,  .nbAdditionalBits=13, .nbBits=6, .baseValue=8195},
+        {.nextState=0,  .nbAdditionalBits=12, .nbBits=6, .baseValue=4099},
+        {.nextState=0,  .nbAdditionalBits=11, .nbBits=6, .baseValue=2051},
+        {.nextState=0,  .nbAdditionalBits=10, .nbBits=6, .baseValue=1027},
 };   /* ML_defaultDTable */
 
 
@@ -1185,33 +1265,37 @@ ZSTD_decodeSequence(seqState_t* seqState, const ZSTD_longOffset_e longOffsets)
      * operations that cause performance drop. This can be avoided by using this
      * ZSTD_memcpy hack.
      */
-#if defined(__aarch64__) && (defined(__GNUC__) && !defined(__clang__))
+//#if defined(__aarch64__) && (defined(__GNUC__) && !defined(__clang__))
+#if 1
     ZSTD_seqSymbol llDInfoS, mlDInfoS, ofDInfoS;
-    ZSTD_seqSymbol* const llDInfo = &llDInfoS;
-    ZSTD_seqSymbol* const mlDInfo = &mlDInfoS;
-    ZSTD_seqSymbol* const ofDInfo = &ofDInfoS;
-    ZSTD_memcpy(llDInfo, seqState->stateLL.table + seqState->stateLL.state, sizeof(ZSTD_seqSymbol));
-    ZSTD_memcpy(mlDInfo, seqState->stateML.table + seqState->stateML.state, sizeof(ZSTD_seqSymbol));
-    ZSTD_memcpy(ofDInfo, seqState->stateOffb.table + seqState->stateOffb.state, sizeof(ZSTD_seqSymbol));
+    llDInfoS.raw = seqState->stateLL.table[seqState->stateLL.state].raw;
+    mlDInfoS.raw = seqState->stateML.table[seqState->stateML.state].raw;
+    ofDInfoS.raw = seqState->stateOffb.table[seqState->stateOffb.state].raw;
+//    const ZSTD_seqSymbol* const llDInfo = &llDInfoS;
+//    const ZSTD_seqSymbol* const mlDInfo = &mlDInfoS;
+//    const ZSTD_seqSymbol* const ofDInfo = &ofDInfoS;
+//    ZSTD_memcpy(llDInfo, seqState->stateLL.table + seqState->stateLL.state, sizeof(ZSTD_seqSymbol));
+//    ZSTD_memcpy(mlDInfo, seqState->stateML.table + seqState->stateML.state, sizeof(ZSTD_seqSymbol));
+//    ZSTD_memcpy(ofDInfo, seqState->stateOffb.table + seqState->stateOffb.state, sizeof(ZSTD_seqSymbol));
 #else
     const ZSTD_seqSymbol* const llDInfo = seqState->stateLL.table + seqState->stateLL.state;
     const ZSTD_seqSymbol* const mlDInfo = seqState->stateML.table + seqState->stateML.state;
     const ZSTD_seqSymbol* const ofDInfo = seqState->stateOffb.table + seqState->stateOffb.state;
 #endif
-    seq.matchLength = mlDInfo->baseValue;
-    seq.litLength = llDInfo->baseValue;
-    {   U32 const ofBase = ofDInfo->baseValue;
-        BYTE const llBits = llDInfo->nbAdditionalBits;
-        BYTE const mlBits = mlDInfo->nbAdditionalBits;
-        BYTE const ofBits = ofDInfo->nbAdditionalBits;
+    seq.matchLength = mlDInfoS.baseValue;
+    seq.litLength = llDInfoS.baseValue;
+    {   U32 const ofBase = ofDInfoS.baseValue;
+        BYTE const llBits = llDInfoS.nbAdditionalBits;
+        BYTE const mlBits = mlDInfoS.nbAdditionalBits;
+        BYTE const ofBits = ofDInfoS.nbAdditionalBits;
         BYTE const totalBits = llBits+mlBits+ofBits;
 
-        U16 const llNext = llDInfo->nextState;
-        U16 const mlNext = mlDInfo->nextState;
-        U16 const ofNext = ofDInfo->nextState;
-        U32 const llnbBits = llDInfo->nbBits;
-        U32 const mlnbBits = mlDInfo->nbBits;
-        U32 const ofnbBits = ofDInfo->nbBits;
+        U16 const llNext = llDInfoS.nextState;
+        U16 const mlNext = mlDInfoS.nextState;
+        U16 const ofNext = ofDInfoS.nextState;
+        U32 const llnbBits = llDInfoS.nbBits;
+        U32 const mlnbBits = mlDInfoS.nbBits;
+        U32 const ofnbBits = ofDInfoS.nbBits;
         /*
          * As gcc has better branch and block analyzers, sometimes it is only
          * valuable to mark likeliness for clang, it gives around 3-4% of
@@ -1242,7 +1326,7 @@ ZSTD_decodeSequence(seqState_t* seqState, const ZSTD_longOffset_e longOffsets)
                 seqState->prevOffset[1] = seqState->prevOffset[0];
                 seqState->prevOffset[0] = offset;
             } else {
-                U32 const ll0 = (llDInfo->baseValue == 0);
+                U32 const ll0 = (llDInfoS.baseValue == 0);
                 if (LIKELY((ofBits == 0))) {
                     offset = seqState->prevOffset[ll0];
                     seqState->prevOffset[1] = seqState->prevOffset[!ll0];
