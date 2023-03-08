@@ -224,6 +224,7 @@ struct ZSTD_matchState_t {
                              */
     U32 nextToUpdate;       /* index from which to continue table update */
     U32 hashLog3;           /* dispatch table for matches of len==3 : larger == faster, more memory */
+    U32 litSkip;            /* latest number of skipped literals, currently only assigned / used in lazy */
 
     U32 rowHashLog;                          /* For row-based matchfinder: Hashlog based on nb of rows in the hashTable.*/
     U16* tagTable;                           /* For row-based matchFinder: A row-based table containing the hashes and head index. */

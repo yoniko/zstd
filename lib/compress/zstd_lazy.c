@@ -896,6 +896,9 @@ FORCE_INLINE_TEMPLATE void ZSTD_row_update_internalImpl(ZSTD_matchState_t* ms,
     for (; updateStartIdx < updateEndIdx; ++updateStartIdx) {
         U32 const hash = useCache ? ZSTD_row_nextCachedHash(ms->hashCache, hashTable, tagTable, base, updateStartIdx, hashLog, rowLog, mls)
                                   : (U32)ZSTD_hashPtr(base + updateStartIdx, hashLog + ZSTD_ROW_HASH_TAG_BITS, mls);
+        if(ms->litSkip > 0 && hash&(ms->litSkip-1)) {
+            continue;
+        }
         U32 const relRow = (hash >> ZSTD_ROW_HASH_TAG_BITS) << rowLog;
         U32* const row = hashTable + relRow;
         BYTE* tagRow = (BYTE*)(tagTable + relRow);  /* Though tagTable is laid out as a table of U16, each tag is only 1 byte.
@@ -1591,7 +1594,9 @@ ZSTD_compressBlock_lazy_generic(
         }
 
         if (matchLength < 4) {
-            ip += ((ip-anchor) >> kSearchStrength) + 1;   /* jump faster over incompressible sections */
+            U32 const litSkip = ((ip-anchor) >> kSearchStrength);
+            ip += litSkip + 1;   /* jump faster over incompressible sections */
+            ms->litSkip = litSkip;
             continue;
         }
 

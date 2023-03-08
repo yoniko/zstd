@@ -1911,6 +1911,7 @@ ZSTD_reset_matchState(ZSTD_matchState_t* ms,
     }
 
     ms->hashLog3 = hashLog3;
+    ms->litSkip = 0;
 
     ZSTD_invalidateMatchState(ms);
 
