@@ -170,7 +170,7 @@ static void AIO_IOPool_createThreadPool(IOPoolCtx_t* ctx, const FIO_prefs_t* pre
         /* We want MAX_IO_JOBS-2 queue items because we need to always have 1 free buffer to
          * decompress into and 1 buffer that's actively written to disk and owned by the writing thread. */
         assert(MAX_IO_JOBS >= 2);
-        ctx->threadPool = POOL_create(1, MAX_IO_JOBS);
+        ctx->threadPool = POOL_create(1, MAX_IO_JOBS - 2);
         ctx->threadPoolActive = 1;
         if (!ctx->threadPool)
             EXM_THROW(104, "Failed creating I/O thread pool");
@@ -207,8 +207,7 @@ static int AIO_IOPool_threadPoolActive(IOPoolCtx_t* ctx) {
  * Locks the IO jobs mutex if threading is active */
 static void AIO_IOPool_lockJobsMutex(IOPoolCtx_t* ctx) {
     if(AIO_IOPool_threadPoolActive(ctx)) {
-        if(ZSTD_pthread_mutex_lock(&ctx->ioJobsMutex))
-            perror("failed");
+        ZSTD_pthread_mutex_lock(&ctx->ioJobsMutex);
     }
 }
 
@@ -405,7 +404,7 @@ void AIO_WritePool_free(WritePoolCtx_t* ctx) {
  * Allows (de)activating async mode, to be used when the expected overhead
  * of asyncio costs more than the expected gains. */
 void AIO_WritePool_setAsync(WritePoolCtx_t* ctx, int async) {
-    AIO_IOPool_setThreaded(&ctx->base, 0); //NOCOMMIT!
+    AIO_IOPool_setThreaded(&ctx->base, async);
 }
 
 
@@ -518,7 +517,6 @@ static void AIO_ReadPool_enqueueRead(ReadPoolCtx_t* ctx) {
 }
 
 static void AIO_ReadPool_startReading(ReadPoolCtx_t* ctx) {
-    int i;
     assert(ctx->base.availableJobsCount == ctx->base.totalIoJobs);
     while (ctx->base.availableJobsCount) {
         AIO_ReadPool_enqueueRead(ctx);
@@ -589,11 +587,11 @@ void AIO_ReadPool_consumeBytes(ReadPoolCtx_t* ctx, size_t n) {
     ctx->srcBuffer += n;
 }
 
-void AIO_ReadPool_renqueueCurrentHeld(ReadPoolCtx_t* ctx) {
+static void AIO_ReadPool_renqueueCurrentHeld(ReadPoolCtx_t* ctx) {
     if (ctx->currentJobHeld) {
         AIO_IOPool_releaseIoJob((IOJob_t *)ctx->currentJobHeld);
         ctx->currentJobHeld = NULL;
-        AIO_ReadPool_enqueueRead(ctx);
+        // AIO_ReadPool_enqueueRead(ctx);
     }
 }
 
@@ -637,11 +635,16 @@ size_t AIO_ReadPool_fillBuffer(ReadPoolCtx_t* ctx, size_t n) {
         assert(ctx->srcBufferLoaded + job->usedBufferSize <= 2*ctx->base.jobBufferSize);
         memcpy(ctx->coalesceBuffer + ctx->srcBufferLoaded, job->buffer, job->usedBufferSize);
         ctx->srcBufferLoaded += job->usedBufferSize;
+        AIO_ReadPool_renqueueCurrentHeld(ctx);
     }
     else {
         ctx->srcBuffer = (U8 *) job->buffer;
         ctx->srcBufferLoaded = job->usedBufferSize;
     }
+    while (ctx->base.availableJobsCount) {
+        AIO_ReadPool_enqueueRead(ctx);
+    }
+
     return job->usedBufferSize;
 }
 

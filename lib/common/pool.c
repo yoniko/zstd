@@ -82,9 +82,9 @@ static int isQueueFull(POOL_ctx const* ctx) {
 static void* POOL_thread(void* opaque) {
     POOL_ctx* const ctx = (POOL_ctx*)opaque;
     if (!ctx) { return NULL; }
-    ZSTD_pthread_mutex_lock(&ctx->queueMutex);
+ZSTD_pthread_mutex_lock(&ctx->queueMutex);
     for (;;) {
-        /* Lock the mutex and wait for a non-empty queue or until shutdown */
+                        /* Lock the mutex and wait for a non-empty queue or until shutdown */
 
         while ( ctx->queueEmpty
             || (ctx->numThreadsBusy >= ctx->threadLimit) ) {
@@ -103,7 +103,7 @@ static void* POOL_thread(void* opaque) {
             ctx->numThreadsBusy++;
             ctx->queueEmpty = (ctx->queueHead == ctx->queueTail);
             /* Unlock the mutex, signal a pusher, and run the job */
-            if(isQueueFull(ctx))
+            if(!isQueueFull(ctx))
                 ZSTD_pthread_cond_signal(&ctx->queuePushCond);
             ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
 
@@ -112,11 +112,11 @@ static void* POOL_thread(void* opaque) {
             /* If the intended queue size was 0, signal after finishing job */
             ZSTD_pthread_mutex_lock(&ctx->queueMutex);
             ctx->numThreadsBusy--;
-            if(isQueueFull(ctx))
+            if(!isQueueFull(ctx))
                 ZSTD_pthread_cond_signal(&ctx->queuePushCond);
-        }
-    }  /* for (;;) */
-    ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
+            }
+            }  /* for (;;) */
+ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
     assert(0);  /* Unreachable */
 }
 
@@ -288,7 +288,7 @@ POOL_add_internal(POOL_ctx* ctx, POOL_function function, void *opaque)
 void POOL_add(POOL_ctx* ctx, POOL_function function, void* opaque)
 {
     assert(ctx != NULL);
-    if(ZSTD_pthread_mutex_lock(&ctx->queueMutex));
+    ZSTD_pthread_mutex_lock(&ctx->queueMutex);
     /* Wait until there is space in the queue for the new job */
     while (isQueueFull(ctx) && (!ctx->shutdown)) {
         ZSTD_pthread_cond_wait(&ctx->queuePushCond, &ctx->queueMutex);
