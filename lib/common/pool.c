@@ -59,6 +59,21 @@ struct POOL_ctx_s {
     int shutdown;
 };
 
+/**
+ * Returns 1 if the queue is full and 0 otherwise.
+ *
+ * When queueSize is 1 (pool was created with an intended queueSize of 0),
+ * then a queue is empty if there is a thread free _and_ no job is waiting.
+ */
+static int isQueueFull(POOL_ctx const* ctx) {
+    if (ctx->queueSize > 1) {
+        return ctx->queueHead == ((ctx->queueTail + 1) % ctx->queueSize);
+    } else {
+        return (ctx->numThreadsBusy == ctx->threadLimit) ||
+               !ctx->queueEmpty;
+    }
+}
+
 /* POOL_thread() :
  * Work thread for the thread pool.
  * Waits for jobs and executes them.
@@ -67,9 +82,9 @@ struct POOL_ctx_s {
 static void* POOL_thread(void* opaque) {
     POOL_ctx* const ctx = (POOL_ctx*)opaque;
     if (!ctx) { return NULL; }
+    ZSTD_pthread_mutex_lock(&ctx->queueMutex);
     for (;;) {
         /* Lock the mutex and wait for a non-empty queue or until shutdown */
-        ZSTD_pthread_mutex_lock(&ctx->queueMutex);
 
         while ( ctx->queueEmpty
             || (ctx->numThreadsBusy >= ctx->threadLimit) ) {
@@ -88,7 +103,8 @@ static void* POOL_thread(void* opaque) {
             ctx->numThreadsBusy++;
             ctx->queueEmpty = (ctx->queueHead == ctx->queueTail);
             /* Unlock the mutex, signal a pusher, and run the job */
-            ZSTD_pthread_cond_signal(&ctx->queuePushCond);
+            if(isQueueFull(ctx))
+                ZSTD_pthread_cond_signal(&ctx->queuePushCond);
             ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
 
             job.function(job.opaque);
@@ -96,10 +112,11 @@ static void* POOL_thread(void* opaque) {
             /* If the intended queue size was 0, signal after finishing job */
             ZSTD_pthread_mutex_lock(&ctx->queueMutex);
             ctx->numThreadsBusy--;
-            ZSTD_pthread_cond_signal(&ctx->queuePushCond);
-            ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
+            if(isQueueFull(ctx))
+                ZSTD_pthread_cond_signal(&ctx->queuePushCond);
         }
     }  /* for (;;) */
+    ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
     assert(0);  /* Unreachable */
 }
 
@@ -252,21 +269,6 @@ int POOL_resize(POOL_ctx* ctx, size_t numThreads)
     return result;
 }
 
-/**
- * Returns 1 if the queue is full and 0 otherwise.
- *
- * When queueSize is 1 (pool was created with an intended queueSize of 0),
- * then a queue is empty if there is a thread free _and_ no job is waiting.
- */
-static int isQueueFull(POOL_ctx const* ctx) {
-    if (ctx->queueSize > 1) {
-        return ctx->queueHead == ((ctx->queueTail + 1) % ctx->queueSize);
-    } else {
-        return (ctx->numThreadsBusy == ctx->threadLimit) ||
-               !ctx->queueEmpty;
-    }
-}
-
 
 static void
 POOL_add_internal(POOL_ctx* ctx, POOL_function function, void *opaque)
@@ -286,7 +288,7 @@ POOL_add_internal(POOL_ctx* ctx, POOL_function function, void *opaque)
 void POOL_add(POOL_ctx* ctx, POOL_function function, void* opaque)
 {
     assert(ctx != NULL);
-    ZSTD_pthread_mutex_lock(&ctx->queueMutex);
+    if(ZSTD_pthread_mutex_lock(&ctx->queueMutex));
     /* Wait until there is space in the queue for the new job */
     while (isQueueFull(ctx) && (!ctx->shutdown)) {
         ZSTD_pthread_cond_wait(&ctx->queuePushCond, &ctx->queueMutex);

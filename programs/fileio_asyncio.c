@@ -170,7 +170,7 @@ static void AIO_IOPool_createThreadPool(IOPoolCtx_t* ctx, const FIO_prefs_t* pre
         /* We want MAX_IO_JOBS-2 queue items because we need to always have 1 free buffer to
          * decompress into and 1 buffer that's actively written to disk and owned by the writing thread. */
         assert(MAX_IO_JOBS >= 2);
-        ctx->threadPool = POOL_create(1, MAX_IO_JOBS - 2);
+        ctx->threadPool = POOL_create(1, MAX_IO_JOBS);
         ctx->threadPoolActive = 1;
         if (!ctx->threadPool)
             EXM_THROW(104, "Failed creating I/O thread pool");
@@ -202,11 +202,14 @@ static int AIO_IOPool_threadPoolActive(IOPoolCtx_t* ctx) {
 }
 
 
+#include <stdio.h>
 /* AIO_IOPool_lockJobsMutex:
  * Locks the IO jobs mutex if threading is active */
 static void AIO_IOPool_lockJobsMutex(IOPoolCtx_t* ctx) {
-    if(AIO_IOPool_threadPoolActive(ctx))
-        ZSTD_pthread_mutex_lock(&ctx->ioJobsMutex);
+    if(AIO_IOPool_threadPoolActive(ctx)) {
+        if(ZSTD_pthread_mutex_lock(&ctx->ioJobsMutex))
+            perror("failed");
+    }
 }
 
 /* AIO_IOPool_unlockJobsMutex:
@@ -402,7 +405,7 @@ void AIO_WritePool_free(WritePoolCtx_t* ctx) {
  * Allows (de)activating async mode, to be used when the expected overhead
  * of asyncio costs more than the expected gains. */
 void AIO_WritePool_setAsync(WritePoolCtx_t* ctx, int async) {
-    AIO_IOPool_setThreaded(&ctx->base, async);
+    AIO_IOPool_setThreaded(&ctx->base, 0); //NOCOMMIT!
 }
 
 
@@ -424,7 +427,8 @@ static void AIO_ReadPool_addJobToCompleted(IOJob_t* job) {
     assert(ctx->completedJobsCount < MAX_IO_JOBS);
     ctx->completedJobs[ctx->completedJobsCount++] = job;
     if(AIO_IOPool_threadPoolActive(&ctx->base)) {
-        ZSTD_pthread_cond_signal(&ctx->jobCompletedCond);
+        if(job->offset == ctx->waitingOnOffset)
+            ZSTD_pthread_cond_signal(&ctx->jobCompletedCond);
     }
     AIO_IOPool_unlockJobsMutex(&ctx->base);
 }
@@ -472,13 +476,13 @@ static IOJob_t* AIO_ReadPool_getNextCompletedJob(ReadPoolCtx_t* ctx) {
         ZSTD_pthread_cond_wait(&ctx->jobCompletedCond, &ctx->base.ioJobsMutex);
         job = AIO_ReadPool_findNextWaitingOffsetCompletedJob_locked(ctx);
     }
+    AIO_IOPool_unlockJobsMutex(&ctx->base);
 
     if(job) {
         assert(job->offset == ctx->waitingOnOffset);
         ctx->waitingOnOffset += job->usedBufferSize;
     }
 
-    AIO_IOPool_unlockJobsMutex(&ctx->base);
     return job;
 }
 
@@ -515,7 +519,8 @@ static void AIO_ReadPool_enqueueRead(ReadPoolCtx_t* ctx) {
 
 static void AIO_ReadPool_startReading(ReadPoolCtx_t* ctx) {
     int i;
-    for (i = 0; i < ctx->base.availableJobsCount; i++) {
+    assert(ctx->base.availableJobsCount == ctx->base.totalIoJobs);
+    while (ctx->base.availableJobsCount) {
         AIO_ReadPool_enqueueRead(ctx);
     }
 }
@@ -584,15 +589,20 @@ void AIO_ReadPool_consumeBytes(ReadPoolCtx_t* ctx, size_t n) {
     ctx->srcBuffer += n;
 }
 
-/* AIO_ReadPool_releaseCurrentlyHeldAndGetNext:
- * Release the current held job and get the next one, returns NULL if no next job available. */
-static IOJob_t* AIO_ReadPool_releaseCurrentHeldAndGetNext(ReadPoolCtx_t* ctx) {
+void AIO_ReadPool_renqueueCurrentHeld(ReadPoolCtx_t* ctx) {
     if (ctx->currentJobHeld) {
         AIO_IOPool_releaseIoJob((IOJob_t *)ctx->currentJobHeld);
         ctx->currentJobHeld = NULL;
         AIO_ReadPool_enqueueRead(ctx);
     }
-    ctx->currentJobHeld = AIO_ReadPool_getNextCompletedJob(ctx);
+}
+
+/* AIO_ReadPool_releaseCurrentlyHeldAndGetNext:
+ * Release the current held job and get the next one, returns NULL if no next job available. */
+static IOJob_t* AIO_ReadPool_releaseCurrentHeldAndGetNext(ReadPoolCtx_t* ctx) {
+    IOJob_t* next = AIO_ReadPool_getNextCompletedJob(ctx);
+    AIO_ReadPool_renqueueCurrentHeld(ctx);
+    ctx->currentJobHeld = next;
     return (IOJob_t*) ctx->currentJobHeld;
 }
 
