@@ -273,7 +273,10 @@ static IOJob_t* AIO_IOPool_acquireJob(IOPoolCtx_t* ctx) {
     IOJob_t *job;
     assert(ctx->file != NULL || ctx->prefs->testMode);
     AIO_IOPool_lockJobsMutex(ctx);
-    assert(ctx->availableJobsCount > 0);
+    if(ctx->availableJobsCount==0) {
+        AIO_IOPool_unlockJobsMutex(ctx);
+        return NULL;
+    }
     job = (IOJob_t*) ctx->availableJobs[--ctx->availableJobsCount];
     AIO_IOPool_unlockJobsMutex(ctx);
     job->usedBufferSize = 0;
@@ -308,6 +311,20 @@ static void AIO_IOPool_enqueueJob(IOJob_t* job) {
         ctx->poolFunction(job);
 }
 
+/* AIO_IOPool_tryEnqueueJob:
+ * Trie to enqueues an io job for execution.
+ * Returns 1 if successful, 0 if not.
+ * The queued job shouldn't be used directly after queueing it. */
+static int AIO_IOPool_tryEnqueueJob(IOJob_t* job) {
+    IOPoolCtx_t* const ctx = (IOPoolCtx_t *)job->ctx;
+    if(AIO_IOPool_threadPoolActive(ctx))
+        return POOL_tryAdd(ctx->threadPool, ctx->poolFunction, job);
+    else {
+        ctx->poolFunction(job);
+        return 1;
+    }
+}
+
 /* ***********************************
  *  WritePool implementation
  *************************************/
@@ -315,7 +332,9 @@ static void AIO_IOPool_enqueueJob(IOJob_t* job) {
 /* AIO_WritePool_acquireJob:
  * Returns an available write job to be used for a future write. */
 IOJob_t* AIO_WritePool_acquireJob(WritePoolCtx_t* ctx) {
-    return AIO_IOPool_acquireJob(&ctx->base);
+    IOJob_t* job = AIO_IOPool_acquireJob(&ctx->base);
+    assert(job != NULL);
+    return job;
 }
 
 /* AIO_WritePool_enqueueAndReacquireWriteJob:
@@ -326,6 +345,7 @@ IOJob_t* AIO_WritePool_acquireJob(WritePoolCtx_t* ctx) {
 void AIO_WritePool_enqueueAndReacquireWriteJob(IOJob_t **job) {
     AIO_IOPool_enqueueJob(*job);
     *job = AIO_IOPool_acquireJob((IOPoolCtx_t *)(*job)->ctx);
+    assert(job != NULL);
 }
 
 /* AIO_WritePool_sparseWriteEnd:
@@ -511,16 +531,29 @@ static void AIO_ReadPool_executeReadJob(void* opaque){
 
 static void AIO_ReadPool_enqueueRead(ReadPoolCtx_t* ctx) {
     IOJob_t* const job = AIO_IOPool_acquireJob(&ctx->base);
+    assert(job != NULL);
     job->offset = ctx->nextReadOffset;
     ctx->nextReadOffset += job->bufferSize;
     AIO_IOPool_enqueueJob(job);
 }
 
-static void AIO_ReadPool_startReading(ReadPoolCtx_t* ctx) {
-    assert(ctx->base.availableJobsCount == ctx->base.totalIoJobs);
-    while (ctx->base.availableJobsCount) {
-        AIO_ReadPool_enqueueRead(ctx);
+static int AIO_ReadPool_tryEnqueueRead(ReadPoolCtx_t* ctx) {
+    IOJob_t* const job = AIO_IOPool_acquireJob(&ctx->base);
+    if(!job)
+        return 0;
+    job->offset = ctx->nextReadOffset;
+    if(AIO_IOPool_tryEnqueueJob(job)) {
+        ctx->nextReadOffset += job->bufferSize;
+        return 1;
+    } {
+        AIO_IOPool_releaseIoJob(job);
+        return 0;
     }
+}
+
+static void AIO_ReadPool_enqueueReads(ReadPoolCtx_t* ctx) {
+    AIO_ReadPool_enqueueRead(ctx); // Need at least one read to be queued
+    while (AIO_ReadPool_tryEnqueueRead(ctx)) {}
 }
 
 /* AIO_ReadPool_setFile:
@@ -541,7 +574,7 @@ void AIO_ReadPool_setFile(ReadPoolCtx_t* ctx, FILE* file) {
     ctx->srcBufferLoaded = 0;
     ctx->reachedEof = 0;
     if(file != NULL)
-        AIO_ReadPool_startReading(ctx);
+        AIO_ReadPool_enqueueReads(ctx);
 }
 
 /* AIO_ReadPool_create:
@@ -587,11 +620,11 @@ void AIO_ReadPool_consumeBytes(ReadPoolCtx_t* ctx, size_t n) {
     ctx->srcBuffer += n;
 }
 
-static void AIO_ReadPool_renqueueCurrentHeld(ReadPoolCtx_t* ctx) {
+static void AIO_ReadPool_requeueCurrentHeld(ReadPoolCtx_t* ctx) {
     if (ctx->currentJobHeld) {
         AIO_IOPool_releaseIoJob((IOJob_t *)ctx->currentJobHeld);
         ctx->currentJobHeld = NULL;
-        // AIO_ReadPool_enqueueRead(ctx);
+        AIO_ReadPool_enqueueRead(ctx);
     }
 }
 
@@ -599,7 +632,7 @@ static void AIO_ReadPool_renqueueCurrentHeld(ReadPoolCtx_t* ctx) {
  * Release the current held job and get the next one, returns NULL if no next job available. */
 static IOJob_t* AIO_ReadPool_releaseCurrentHeldAndGetNext(ReadPoolCtx_t* ctx) {
     IOJob_t* next = AIO_ReadPool_getNextCompletedJob(ctx);
-    AIO_ReadPool_renqueueCurrentHeld(ctx);
+    AIO_ReadPool_requeueCurrentHeld(ctx);
     ctx->currentJobHeld = next;
     return (IOJob_t*) ctx->currentJobHeld;
 }
@@ -635,15 +668,14 @@ size_t AIO_ReadPool_fillBuffer(ReadPoolCtx_t* ctx, size_t n) {
         assert(ctx->srcBufferLoaded + job->usedBufferSize <= 2*ctx->base.jobBufferSize);
         memcpy(ctx->coalesceBuffer + ctx->srcBufferLoaded, job->buffer, job->usedBufferSize);
         ctx->srcBufferLoaded += job->usedBufferSize;
-        AIO_ReadPool_renqueueCurrentHeld(ctx);
+        // AIO_ReadPool_requeueCurrentHeld(ctx);
     }
     else {
         ctx->srcBuffer = (U8 *) job->buffer;
         ctx->srcBufferLoaded = job->usedBufferSize;
     }
-    while (ctx->base.availableJobsCount) {
-        AIO_ReadPool_enqueueRead(ctx);
-    }
+    // AIO_ReadPool_enqueueReads(ctx);
+    while (AIO_ReadPool_tryEnqueueRead(ctx)) {}
 
     return job->usedBufferSize;
 }

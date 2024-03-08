@@ -82,10 +82,9 @@ static int isQueueFull(POOL_ctx const* ctx) {
 static void* POOL_thread(void* opaque) {
     POOL_ctx* const ctx = (POOL_ctx*)opaque;
     if (!ctx) { return NULL; }
-ZSTD_pthread_mutex_lock(&ctx->queueMutex);
     for (;;) {
-                        /* Lock the mutex and wait for a non-empty queue or until shutdown */
-
+        /* Lock the mutex and wait for a non-empty queue or until shutdown */
+        ZSTD_pthread_mutex_lock(&ctx->queueMutex);
         while ( ctx->queueEmpty
             || (ctx->numThreadsBusy >= ctx->threadLimit) ) {
             if (ctx->shutdown) {
@@ -114,9 +113,9 @@ ZSTD_pthread_mutex_lock(&ctx->queueMutex);
             ctx->numThreadsBusy--;
             if(!isQueueFull(ctx))
                 ZSTD_pthread_cond_signal(&ctx->queuePushCond);
-            }
-            }  /* for (;;) */
-ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
+            ZSTD_pthread_mutex_unlock(&ctx->queueMutex);
+        }
+    }  /* for (;;) */
     assert(0);  /* Unreachable */
 }
 
