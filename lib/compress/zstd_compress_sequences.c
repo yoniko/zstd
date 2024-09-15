@@ -12,36 +12,7 @@
  *  Dependencies
  ***************************************/
 #include "zstd_compress_sequences.h"
-
-/**
- * -log2(x / 256) lookup table for x in [0, 256).
- * If x == 0: Return 0
- * Else: Return floor(-log2(x / 256) * 256)
- */
-static unsigned const kInverseProbabilityLog256[256] = {
-    0,    2048, 1792, 1642, 1536, 1453, 1386, 1329, 1280, 1236, 1197, 1162,
-    1130, 1100, 1073, 1047, 1024, 1001, 980,  960,  941,  923,  906,  889,
-    874,  859,  844,  830,  817,  804,  791,  779,  768,  756,  745,  734,
-    724,  714,  704,  694,  685,  676,  667,  658,  650,  642,  633,  626,
-    618,  610,  603,  595,  588,  581,  574,  567,  561,  554,  548,  542,
-    535,  529,  523,  517,  512,  506,  500,  495,  489,  484,  478,  473,
-    468,  463,  458,  453,  448,  443,  438,  434,  429,  424,  420,  415,
-    411,  407,  402,  398,  394,  390,  386,  382,  377,  373,  370,  366,
-    362,  358,  354,  350,  347,  343,  339,  336,  332,  329,  325,  322,
-    318,  315,  311,  308,  305,  302,  298,  295,  292,  289,  286,  282,
-    279,  276,  273,  270,  267,  264,  261,  258,  256,  253,  250,  247,
-    244,  241,  239,  236,  233,  230,  228,  225,  222,  220,  217,  215,
-    212,  209,  207,  204,  202,  199,  197,  194,  192,  190,  187,  185,
-    182,  180,  178,  175,  173,  171,  168,  166,  164,  162,  159,  157,
-    155,  153,  151,  149,  146,  144,  142,  140,  138,  136,  134,  132,
-    130,  128,  126,  123,  121,  119,  117,  115,  114,  112,  110,  108,
-    106,  104,  102,  100,  98,   96,   94,   93,   91,   89,   87,   85,
-    83,   82,   80,   78,   76,   74,   73,   71,   69,   67,   66,   64,
-    62,   61,   59,   57,   55,   54,   52,   50,   49,   47,   46,   44,
-    42,   41,   39,   37,   36,   34,   33,   31,   30,   28,   26,   25,
-    23,   22,   20,   19,   17,   16,   14,   13,   11,   10,   8,    7,
-    5,    4,    2,    1,
-};
+#include "zstd_entropy.h"
 
 static unsigned ZSTD_getFSEMaxSymbolValue(FSE_CTable const* ctable) {
   void const* ptr = ctable;
@@ -77,25 +48,6 @@ static size_t ZSTD_NCountCost(unsigned const* count, unsigned const max,
     return FSE_writeNCount(wksp, sizeof(wksp), norm, max, tableLog);
 }
 
-/**
- * Returns the cost in bits of encoding the distribution described by count
- * using the entropy bound.
- */
-static size_t ZSTD_entropyCost(unsigned const* count, unsigned const max, size_t const total)
-{
-    unsigned cost = 0;
-    unsigned s;
-
-    assert(total > 0);
-    for (s = 0; s <= max; ++s) {
-        unsigned norm = (unsigned)((256 * count[s]) / total);
-        if (count[s] != 0 && norm == 0)
-            norm = 1;
-        assert(count[s] < total);
-        cost += count[s] * kInverseProbabilityLog256[norm];
-    }
-    return cost >> 8;
-}
 
 /**
  * Returns the cost in bits of encoding the distribution in count using ctable.
@@ -129,28 +81,6 @@ size_t ZSTD_fseBitCost(
         cost += (size_t)count[s] * bitCost;
     }
     return cost >> kAccuracyLog;
-}
-
-/**
- * Returns the cost in bits of encoding the distribution in count using the
- * table described by norm. The max symbol support by norm is assumed >= max.
- * norm must be valid for every symbol with non-zero probability in count.
- */
-size_t ZSTD_crossEntropyCost(short const* norm, unsigned accuracyLog,
-                             unsigned const* count, unsigned const max)
-{
-    unsigned const shift = 8 - accuracyLog;
-    size_t cost = 0;
-    unsigned s;
-    assert(accuracyLog <= 8);
-    for (s = 0; s <= max; ++s) {
-        unsigned const normAcc = (norm[s] != -1) ? (unsigned)norm[s] : 1;
-        unsigned const norm256 = normAcc << shift;
-        assert(norm256 > 0);
-        assert(norm256 < 256);
-        cost += count[s] * kInverseProbabilityLog256[norm256];
-    }
-    return cost >> 8;
 }
 
 symbolEncodingType_e

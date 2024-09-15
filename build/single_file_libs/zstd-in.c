@@ -71,6 +71,7 @@
 #include "compress/zstd_compress_superblock.c"
 #include "compress/zstd_compress.c"
 #include "compress/zstd_double_fast.c"
+#include "compress/zstd_entropy.c"
 #include "compress/zstd_fast.c"
 #include "compress/zstd_lazy.c"
 #include "compress/zstd_ldm.c"

@@ -1,0 +1,19 @@
+{
+  "benchmarks": [
+    {
+      "type": "compress-files",
+      "inputs": [
+        "enwik8.zst",
+        "silesia.tar.zst"
+      ],
+      "repeats": 5,
+      "additional_flags": ["-b1"]
+    }
+  ],
+  "compilers": [
+    "clang"
+  ],
+  "git_labels": [
+    ""
+  ]
+}

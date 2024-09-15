@@ -21,6 +21,7 @@
 #include "zstd_compress_internal.h"
 #include "zstd_compress_sequences.h"
 #include "zstd_compress_literals.h"
+#include "zstd_entropy.h"
 #include "zstd_fast.h"
 #include "zstd_double_fast.h"
 #include "zstd_lazy.h"
